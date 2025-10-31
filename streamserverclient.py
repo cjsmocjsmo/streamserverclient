@@ -186,7 +186,7 @@ class VideoStreamHandler(http.server.SimpleHTTPRequestHandler):
     
     <div class="streams-container">
         <div class="stream-box">
-            <div class="stream-title">📹 Raspberry Pi 1</div>
+            <div class="stream-title">📹 Shed - piir</div>
             <div class="video-container">
                 <img id="stream1" class="video-stream" src="" alt="Video Stream 1">
                 <div id="status1" class="stream-status status-offline">Offline</div>
@@ -199,7 +199,7 @@ class VideoStreamHandler(http.server.SimpleHTTPRequestHandler):
         </div>
         
         <div class="stream-box">
-            <div class="stream-title">📹 Raspberry Pi 2</div>
+            <div class="stream-title">📹 BackDoor - pipiw</div>
             <div class="video-container">
                 <img id="stream2" class="video-stream" src="" alt="Video Stream 2">
                 <div id="status2" class="stream-status status-offline">Offline</div>
@@ -212,7 +212,7 @@ class VideoStreamHandler(http.server.SimpleHTTPRequestHandler):
         </div>
         
         <div class="stream-box">
-            <div class="stream-title">📹 Raspberry Pi 3</div>
+            <div class="stream-title">📹 FrontDoor - picam</div>
             <div class="video-container">
                 <img id="stream3" class="video-stream" src="" alt="Video Stream 3">
                 <div id="status3" class="stream-status status-offline">Offline</div>

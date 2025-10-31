@@ -1,19 +1,19 @@
 {
   "streams": {
     "stream1": {
-      "name": "Raspberry Pi 1 - Living Room",
-      "url": "http://192.168.1.100:8080/stream",
-      "description": "Main living room camera"
+      "name": "piir - Shed",
+      "url": "http://10.0.4.67:8000/stream.mjpg",
+      "description": "Shed camera"
     },
     "stream2": {
-      "name": "Raspberry Pi 2 - Kitchen", 
-      "url": "http://192.168.1.101:8080/stream",
-      "description": "Kitchen monitoring camera"
+      "name": "pipiw - BackDoor", 
+      "url": "http://10.0.6.165:8000/stream.mjpg",
+      "description": "BackDoor camera"
     },
     "stream3": {
-      "name": "Raspberry Pi 3 - Garden",
-      "url": "http://192.168.1.102:8080/stream", 
-      "description": "Outdoor garden camera"
+      "name": "picam - FrontDoor",
+      "url": "http://10.0.4.60:8000/stream.mjpg", 
+      "description": "FrontDoor camera"
     }
   },
   "server": {
