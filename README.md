@@ -1,20 +1,29 @@
-# Raspberry Pi Video Stream Server
+# Raspberry Pi Video Stream Server with Motion Detection
 
-A minimal HTTP server that displays three video streams from remote Raspberry Pi devices using HTML, CSS, and JavaScript.
+A minimal HTTP server that displays three video streams from remote Raspberry Pi devices using HTML, CSS, and JavaScript, with integrated OpenCV motion detection for human-sized objects.
 
 ## Features
 
 - 📺 Display up to 3 video streams simultaneously
-- 🔄 Auto-refresh offline streams every 30 seconds
+- 🎯 **Motion Detection**: OpenCV-based motion detection for human-sized objects
+- � **Bounding Boxes**: Visual rectangles drawn around detected motion
+- �🔄 Auto-refresh offline streams every 30 seconds
 - 📱 Responsive design that works on mobile and desktop
 - ⚙️ Easy configuration via JSON file
-- 🎛️ Individual stream controls (toggle, refresh)
+- 🎛️ Individual stream controls (toggle, refresh, motion detection, view toggle)
 - 🔍 Real-time connection status indicators
+- 🚨 Motion detection alerts with visual indicators
+- 👁️ **Dual View Modes**: Switch between original and motion-processed feeds
 - ❌ Error handling and retry mechanisms
 
 ## Quick Start
 
-1. **Configure your Raspberry Pi stream URLs** in `config.json`:
+1. **Install dependencies**:
+   ```bash
+   pip3 install -r requirements.txt
+   ```
+
+2. **Configure your Raspberry Pi stream URLs** in `config.json`:
    ```json
    {
      "streams": {
@@ -27,14 +36,55 @@ A minimal HTTP server that displays three video streams from remote Raspberry Pi
    }
    ```
 
-2. **Run the server**:
+3. **Run the server**:
    ```bash
    python3 streamserverclient.py
    ```
 
-3. **Open your browser** and go to: `http://localhost:8000`
+4. **Open your browser** and go to: `http://localhost:8000`
+
+5. **Enable motion detection**: Click the "Start Motion" button for any stream to begin detecting human-sized objects
+
+## Motion Detection
+
+### Features
+- **Human-sized object detection**: Optimized for detecting people (not small animals or objects)
+- **Visual bounding boxes**: Red rectangles drawn around detected motion with area information
+- **Background subtraction**: Uses MOG2 algorithm for robust motion detection
+- **Configurable sensitivity**: Adjustable thresholds for different environments
+- **Real-time alerts**: Visual indicators when motion is detected
+- **Dual view modes**: Switch between original video and motion-processed feed
+- **Live overlays**: Timestamp, status, and detection information overlaid on video
+- **Individual control**: Enable/disable motion detection per stream
+
+### How It Works
+1. **Background Learning**: The system learns the background of each video stream
+2. **Motion Analysis**: Detects moving objects and filters by size and aspect ratio
+3. **Human Detection**: Focuses on objects with human-like proportions (height > width)
+4. **Bounding Box Drawing**: Draws red rectangles around detected motion with area labels
+5. **Real-time Processing**: Motion processing and overlay generation in real-time
+6. **View Toggle**: Switch between original video and motion-processed feed with overlays
+7. **Status Updates**: Motion status updates every 2 seconds, video refreshes every second
+
+### API Endpoints
+- `GET /api/motion/` - Get motion status for all streams
+- `GET /api/motion/{stream_id}/status` - Get motion status for specific stream
+- `POST /api/motion/{stream_id}/start` - Start motion detection for stream
+- `POST /api/motion/{stream_id}/stop` - Stop motion detection for stream
+- `GET /motion_feed/{stream_id}` - Get processed video frame with bounding boxes
 
 ## Configuration
+
+### Dependencies
+Install required Python packages:
+```bash
+pip3 install opencv-python numpy requests
+```
+
+Or use the requirements file:
+```bash
+pip3 install -r requirements.txt
+```
 
 ### Stream URLs
 Edit `config.json` to set your Raspberry Pi stream URLs. Common formats:
@@ -107,6 +157,12 @@ mjpg_streamer -i "input_uvc.so -d /dev/video0 -r 640x480 -f 10" -o "output_http.
 2. Verify the stream URL in a browser: `http://PI_IP:8080/stream`
 3. Check firewall settings on both server and Pi
 4. Ensure the camera service is running on the Pi
+
+### Motion Detection Issues
+- **High CPU usage**: Motion detection is CPU-intensive; consider reducing resolution or frame rate
+- **False positives**: Adjust motion detection parameters in the code (`min_contour_area`, `max_contour_area`)
+- **Not detecting people**: Ensure good lighting and check if the stream resolution is adequate
+- **Detection too sensitive**: Increase `min_contour_area` or `motion_threshold` values
 
 ### Performance Issues
 - Reduce video resolution on the Raspberry Pi
