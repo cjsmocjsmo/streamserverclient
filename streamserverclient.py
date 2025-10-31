@@ -71,7 +71,7 @@ class VideoStreamHandler(http.server.SimpleHTTPRequestHandler):
         }
         
         .header h1 {
-            color: #333;
+            color: #000000;
             margin-bottom: 10px;
         }
         
@@ -84,7 +84,7 @@ class VideoStreamHandler(http.server.SimpleHTTPRequestHandler):
         }
         
         .stream-box {
-            background: white;
+            background: #34495e;
             border-radius: 8px;
             padding: 15px;
             box-shadow: 0 2px 10px rgba(0,0,0,0.1);
@@ -100,7 +100,7 @@ class VideoStreamHandler(http.server.SimpleHTTPRequestHandler):
             font-size: 18px;
             font-weight: bold;
             margin-bottom: 10px;
-            color: #333;
+            color: #ecf0f1;
             text-align: center;
         }
         
