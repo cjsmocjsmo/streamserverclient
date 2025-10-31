@@ -223,6 +223,15 @@ class VideoStreamHandler(http.server.SimpleHTTPRequestHandler):
             </div>
             <div id="error3" class="error-message" style="display: none;"></div>
         </div>
+        <audio id="backgroundAudio" autoplay loop controls style="position: fixed; bottom: 10px; right: 10px; z-index: 1000; opacity: 0.8;">
+            <source src="https://playerservices.streamtheworld.com/api/livestream-redirect/KPLZFMAAC.aac" type="audio/aac">
+            <source src="https://playerservices.streamtheworld.com/api/livestream-redirect/KPLZFM.mp3" type="audio/mpeg">
+            <source src="https://playerservices.streamtheworld.com/api/livestream-redirect/KMADFMAAC.aac" type="audio/aac">
+            <source src="https://playerservices.streamtheworld.com/api/livestream-redirect/KMADFM.mp3" type="audio/mpeg">
+            <source src="https://ice42.securenetsystems.net/KPLZ" type="audio/mpeg">
+            <source src="https://ice42.securenetsystems.net/KMAD" type="audio/mpeg">
+            Your browser does not support the audio element.
+        </audio>
     </div>
 
     <script>
