@@ -62,7 +62,7 @@ class VideoStreamHandler(http.server.SimpleHTTPRequestHandler):
             font-family: Arial, sans-serif;
             margin: 0;
             padding: 20px;
-            background-color: #f0f0f0;
+            background-color: #2c3e50;
         }
         
         .header {
