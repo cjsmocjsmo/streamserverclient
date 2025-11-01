@@ -3,21 +3,30 @@
     "stream1": {
       "name": "piir - Shed",
       "url": "rtsp://10.0.4.67:8554/stream",
+      "fallback_url": "https://sample-videos.com/zip/10/mp4/SampleVideo_1280x720_1mb.mp4",
       "description": "Shed camera"
     },
     "stream2": {
       "name": "pipiw - BackDoor", 
       "url": "rtsp://10.0.6.165:8554/stream",
+      "fallback_url": "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4",
       "description": "BackDoor camera"
     },
     "stream3": {
       "name": "picam - FrontDoor",
-      "url": "rtsp://10.0.4.60:8554/stream", 
+      "url": "rtsp://10.0.4.60:8554/stream",
+      "fallback_url": "https://sample-videos.com/zip/10/mp4/SampleVideo_640x360_1mb.mp4",
       "description": "FrontDoor camera"
     }
   },
   "server": {
     "port": 8000,
     "host": "0.0.0.0"
+  },
+  "settings": {
+    "use_fallback_streams": true,
+    "connection_timeout": 5,
+    "auto_retry": true,
+    "max_retries": 3
   }
 }
