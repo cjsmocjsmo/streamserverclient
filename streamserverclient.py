@@ -13,8 +13,10 @@ import queue
 import numpy as np
 import cv2
 
-# Set Qt platform before importing PyQt6
+# Set Qt platform and GNOME compatibility before importing PyQt6
 os.environ['QT_QPA_PLATFORM'] = 'xcb'
+os.environ['QT_QPA_PLATFORMTHEME'] = 'gtk3'  # Use GTK3 theme for GNOME integration
+os.environ['QT_SCALE_FACTOR'] = '1'  # Disable Qt scaling that can conflict with GNOME
 
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                             QHBoxLayout, QLabel, QPushButton, QGridLayout,
@@ -444,13 +446,9 @@ class RTSPClientMainWindow(QMainWindow):
     def setup_ui(self):
         self.setWindowTitle("RTSP Video Stream Client")
         
-        # Set window flags to include standard controls (minimize, maximize, close)
-        self.setWindowFlags(
-            Qt.WindowType.Window |
-            Qt.WindowType.WindowMinimizeButtonHint |
-            Qt.WindowType.WindowMaximizeButtonHint |
-            Qt.WindowType.WindowCloseButtonHint
-        )
+        # Use default window flags for GNOME compatibility
+        # GNOME will automatically provide minimize, maximize, close buttons
+        self.setWindowFlags(Qt.WindowType.Window)
         
         # Detect screen size and set window geometry
         screen = QApplication.primaryScreen()
@@ -471,10 +469,10 @@ class RTSPClientMainWindow(QMainWindow):
         # Store windowed geometry for later use
         self.windowed_geometry = (x, y, window_width, window_height)
         
-        # Start maximized to show window controls, can go fullscreen with F11/Escape
-        self.showMaximized()
+        # Set initial geometry for GNOME compatibility
+        self.setGeometry(x, y, window_width, window_height)
         
-        print(f"Window maximized with controls visible (windowed fallback: {window_width}x{window_height} at ({x}, {y}))")
+        print(f"Window geometry set to: {window_width}x{window_height} at ({x}, {y})")
         print("Press F11 or Escape to toggle fullscreen mode")
         
         # Dark theme
@@ -641,8 +639,11 @@ def main():
     app.setApplicationVersion("1.0")
     
     window = RTSPClientMainWindow()
-    # Note: showMaximized() is called in setup_ui(), window controls are visible
-    window.show()
+    
+    # GNOME-compatible window display sequence
+    window.show()  # Show the window first
+    QApplication.processEvents()  # Process events
+    window.showMaximized()  # Then maximize for full screen usage
     
     sys.exit(app.exec())
 
