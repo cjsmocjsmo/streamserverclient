@@ -10,7 +10,7 @@ import os
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                             QHBoxLayout, QLabel, QPushButton, QGridLayout,
                             QFrame, QMessageBox, QLineEdit, QFormLayout,
-                            QDialog, QCheckBox, QSpinBox)
+                            QDialog, QCheckBox, QSpinBox, QSizePolicy)
 from PyQt6.QtCore import QThread, pyqtSignal, QTimer, Qt, QSize
 from PyQt6.QtGui import QPixmap, QImage, QPalette, QColor, QFont
 import cv2
@@ -120,8 +120,8 @@ class StreamWidget(QFrame):
         self.video_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.video_label.setMinimumSize(400, 300)
         self.video_label.setSizePolicy(
-            self.video_label.sizePolicy().Expanding, 
-            self.video_label.sizePolicy().Expanding
+            QSizePolicy.Policy.Expanding, 
+            QSizePolicy.Policy.Expanding
         )
         self.video_label.setScaledContents(False)  # We'll handle scaling manually
         self.video_label.setStyleSheet("""
