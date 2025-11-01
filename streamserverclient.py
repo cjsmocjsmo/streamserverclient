@@ -13,10 +13,38 @@ import queue
 import numpy as np
 import cv2
 
-# Set Qt platform and GNOME compatibility before importing PyQt6
+# Detect desktop environment
+def detect_desktop_environment():
+    desktop = os.environ.get('XDG_CURRENT_DESKTOP', '').lower()
+    session = os.environ.get('DESKTOP_SESSION', '').lower()
+    gdm = os.environ.get('GDMSESSION', '').lower()
+    
+    if 'gnome' in desktop or 'gnome' in session or 'gnome' in gdm:
+        return 'gnome'
+    elif 'kde' in desktop or 'plasma' in desktop:
+        return 'kde'
+    elif 'xfce' in desktop:
+        return 'xfce'
+    elif 'lxde' in desktop or 'lxqt' in desktop:
+        return 'lxde'
+    else:
+        return 'unknown'
+
+# Set Qt platform and desktop-specific compatibility
+desktop_env = detect_desktop_environment()
+print(f"Detected desktop environment: {desktop_env}")
+
 os.environ['QT_QPA_PLATFORM'] = 'xcb'
-os.environ['QT_QPA_PLATFORMTHEME'] = 'gtk3'  # Use GTK3 theme for GNOME integration
-os.environ['QT_SCALE_FACTOR'] = '1'  # Disable Qt scaling that can conflict with GNOME
+if desktop_env == 'gnome':
+    # GNOME-specific settings
+    os.environ['QT_QPA_PLATFORMTHEME'] = 'gtk3'
+    os.environ['QT_SCALE_FACTOR'] = '1'
+    os.environ['QT_AUTO_SCREEN_SCALE_FACTOR'] = '0'
+    os.environ['QT_WAYLAND_DISABLE_WINDOWDECORATION'] = '1'
+else:
+    # Generic settings for other desktops
+    os.environ['QT_QPA_PLATFORMTHEME'] = 'gtk3'
+    os.environ['QT_SCALE_FACTOR'] = '1'
 
 from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, 
                             QHBoxLayout, QLabel, QPushButton, QGridLayout,
@@ -447,9 +475,20 @@ class RTSPClientMainWindow(QMainWindow):
     def setup_ui(self):
         self.setWindowTitle("RTSP Video Stream Client")
         
-        # Use default window flags for GNOME compatibility
-        # GNOME will automatically provide minimize, maximize, close buttons
-        self.setWindowFlags(Qt.WindowType.Window)
+        # Desktop environment specific window flags
+        desktop_env = detect_desktop_environment()
+        if desktop_env == 'gnome':
+            # GNOME-specific window flags
+            self.setWindowFlags(
+                Qt.WindowType.Window |
+                Qt.WindowType.WindowTitleHint |
+                Qt.WindowType.WindowSystemMenuHint |
+                Qt.WindowType.WindowMinMaxButtonsHint |
+                Qt.WindowType.WindowCloseButtonHint
+            )
+        else:
+            # Default window flags for other environments
+            self.setWindowFlags(Qt.WindowType.Window)
         
         # Detect screen size and set window geometry
         screen = QApplication.primaryScreen()
@@ -712,12 +751,39 @@ def main():
     
     window = RTSPClientMainWindow()
     
-    # GNOME-compatible window display sequence
-    window.show()  # Show the window first
-    QApplication.processEvents()  # Process events
-    window.showMaximized()  # Then maximize for full screen usage
+    # Desktop environment specific window management
+    desktop_env = detect_desktop_environment()
+    
+    if desktop_env == 'gnome':
+        # GNOME-specific sequence for proper window handling
+        print("Applying GNOME window management...")
+        window.show()
+        QApplication.processEvents()
+        
+        # For GNOME, we need to wait a bit before maximizing
+        QTimer.singleShot(100, lambda: gnome_window_setup(window))
+    else:
+        # Standard sequence for other desktop environments
+        print("Applying standard window management...")
+        window.show()
+        QApplication.processEvents()
+        window.showMaximized()
     
     sys.exit(app.exec())
+
+def gnome_window_setup(window):
+    """Special window setup for GNOME desktop environment"""
+    # Ensure window is properly centered and maximized in GNOME
+    screen = QApplication.primaryScreen()
+    available_rect = screen.availableGeometry()
+    
+    # Move to center first
+    window.move(available_rect.center() - window.rect().center())
+    QApplication.processEvents()
+    
+    # Then maximize
+    window.showMaximized()
+    print("GNOME window setup completed")
 
 if __name__ == "__main__":
     main()
