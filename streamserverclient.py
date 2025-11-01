@@ -118,7 +118,12 @@ class StreamWidget(QFrame):
         # Video display area
         self.video_label = QLabel()
         self.video_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.video_label.setMinimumSize(640, 480)
+        self.video_label.setMinimumSize(400, 300)
+        self.video_label.setSizePolicy(
+            self.video_label.sizePolicy().Expanding, 
+            self.video_label.sizePolicy().Expanding
+        )
+        self.video_label.setScaledContents(False)  # We'll handle scaling manually
         self.video_label.setStyleSheet("""
             QLabel {
                 background-color: #000000;
@@ -127,7 +132,7 @@ class StreamWidget(QFrame):
             }
         """)
         self.video_label.setText("📺 No Signal")
-        layout.addWidget(self.video_label)
+        layout.addWidget(self.video_label, 1)  # Give it stretch factor
         
         # Status label
         self.status_label = QLabel("Disconnected")
@@ -266,15 +271,26 @@ class StreamWidget(QFrame):
         bytes_per_line = ch * w
         qt_image = QImage(rgb_frame.data, w, h, bytes_per_line, QImage.Format.Format_RGB888)
         
-        # Scale to fit widget
+        # Scale to fit widget with proper aspect ratio
         pixmap = QPixmap.fromImage(qt_image)
-        scaled_pixmap = pixmap.scaled(
-            self.video_label.size(), 
-            Qt.AspectRatioMode.KeepAspectRatio, 
-            Qt.TransformationMode.SmoothTransformation
-        )
+        label_size = self.video_label.size()
         
-        self.video_label.setPixmap(scaled_pixmap)
+        # Ensure we have a valid size
+        if label_size.width() > 0 and label_size.height() > 0:
+            scaled_pixmap = pixmap.scaled(
+                label_size, 
+                Qt.AspectRatioMode.KeepAspectRatio, 
+                Qt.TransformationMode.SmoothTransformation
+            )
+            self.video_label.setPixmap(scaled_pixmap)
+        else:
+            # Fallback for initial sizing
+            scaled_pixmap = pixmap.scaled(
+                400, 300, 
+                Qt.AspectRatioMode.KeepAspectRatio, 
+                Qt.TransformationMode.SmoothTransformation
+            )
+            self.video_label.setPixmap(scaled_pixmap)
     
     def update_status(self, stream_id, status):
         """Update the status label"""
@@ -367,12 +383,28 @@ class RTSPClientMainWindow(QMainWindow):
         self.setWindowTitle("🎥 RTSP Video Stream Client")
         self.setGeometry(100, 100, 1400, 800)
         
+        # Set minimum and maximum sizes for proper window controls
+        self.setMinimumSize(800, 600)
+        self.setMaximumSize(2560, 1440)  # Allow for large displays
+        
+        # Enable window controls (minimize, maximize, close)
+        self.setWindowFlags(
+            Qt.WindowType.Window |
+            Qt.WindowType.WindowMinimizeButtonHint |
+            Qt.WindowType.WindowMaximizeButtonHint |
+            Qt.WindowType.WindowCloseButtonHint |
+            Qt.WindowType.WindowSystemMenuHint
+        )
+        
         # Set dark theme
         self.setStyleSheet("""
             QMainWindow {
                 background-color: #2c3e50;
             }
         """)
+        
+        # Create menu bar with window controls
+        self.create_menu_bar()
         
         # Central widget
         central_widget = QWidget()
@@ -395,27 +427,10 @@ class RTSPClientMainWindow(QMainWindow):
         """)
         main_layout.addWidget(title_label)
         
-        # Stream grid
-        stream_layout = QGridLayout()
-        
-        # Create three stream widgets
-        stream_configs = [
-            ("stream1", "Camera 1", ""),
-            ("stream2", "Camera 2", ""),
-            ("stream3", "Camera 3", "")
-        ]
-        
-        for i, (stream_id, name, url) in enumerate(stream_configs):
-            widget = StreamWidget(stream_id, name, url)
-            self.stream_widgets.append(widget)
-            
-            # Arrange in grid: 2 on top, 1 centered below
-            if i < 2:
-                stream_layout.addWidget(widget, 0, i)
-            else:
-                stream_layout.addWidget(widget, 1, 0, 1, 2)  # Span 2 columns
-        
-        main_layout.addLayout(stream_layout)
+        # Stream layout container
+        self.stream_container = QWidget()
+        self.update_stream_layout()
+        main_layout.addWidget(self.stream_container)
         
         # Control panel
         control_layout = QHBoxLayout()
@@ -490,6 +505,204 @@ class RTSPClientMainWindow(QMainWindow):
         """)
         
         central_widget.setLayout(main_layout)
+        
+        # Create stream widgets
+        self.create_stream_widgets()
+    
+    def create_stream_widgets(self):
+        """Create the three stream widgets"""
+        stream_configs = [
+            ("stream1", "Camera 1", ""),
+            ("stream2", "Camera 2", ""),
+            ("stream3", "Camera 3", "")
+        ]
+        
+        for stream_id, name, url in stream_configs:
+            widget = StreamWidget(stream_id, name, url)
+            self.stream_widgets.append(widget)
+    
+    def update_stream_layout(self):
+        """Update stream layout based on window size and state"""
+        # Clear existing layout
+        if self.stream_container.layout():
+            layout = self.stream_container.layout()
+            while layout.count():
+                child = layout.takeAt(0)
+                if child.widget():
+                    child.widget().setParent(None)
+            layout.setParent(None)
+        
+        # Determine layout based on window size and state
+        window_width = self.width()
+        window_height = self.height()
+        aspect_ratio = window_width / window_height if window_height > 0 else 1.0
+        
+        # Use horizontal layout when maximized or when window is wide
+        use_horizontal = self.isMaximized() or self.isFullScreen() or aspect_ratio > 1.8
+        
+        if use_horizontal:
+            # Horizontal layout - all streams in a row
+            layout = QHBoxLayout()
+            layout.setSpacing(10)
+            layout.setContentsMargins(10, 10, 10, 10)
+            
+            for widget in self.stream_widgets:
+                layout.addWidget(widget)
+                # Set maximum width for each stream when in horizontal mode
+                widget.setMaximumWidth(600)
+                widget.setMinimumWidth(300)
+                # Reset height constraints
+                widget.setMaximumHeight(16777215)  # Default max
+                widget.setMinimumHeight(250)
+        else:
+            # Grid layout - 2 on top, 1 below for normal/small windows
+            layout = QGridLayout()
+            layout.setSpacing(10)
+            layout.setContentsMargins(10, 10, 10, 10)
+            
+            for i, widget in enumerate(self.stream_widgets):
+                if i < 2:
+                    layout.addWidget(widget, 0, i)
+                else:
+                    layout.addWidget(widget, 1, 0, 1, 2)  # Span 2 columns
+                
+                # Reset size constraints for grid mode
+                widget.setMaximumWidth(16777215)  # Default max
+                widget.setMaximumHeight(16777215)  # Default max
+                widget.setMinimumWidth(250)
+                widget.setMinimumHeight(250)
+        
+        self.stream_container.setLayout(layout)
+    
+    def resizeEvent(self, event):
+        """Handle window resize events"""
+        super().resizeEvent(event)
+        if hasattr(self, 'stream_container'):
+            # Use a timer to avoid excessive layout updates during resize
+            if not hasattr(self, 'resize_timer'):
+                self.resize_timer = QTimer()
+                self.resize_timer.setSingleShot(True)
+                self.resize_timer.timeout.connect(self.update_stream_layout)
+            
+            self.resize_timer.stop()
+            self.resize_timer.start(100)  # 100ms delay
+    
+    def create_menu_bar(self):
+        """Create menu bar with window controls and options"""
+        menubar = self.menuBar()
+        menubar.setStyleSheet("""
+            QMenuBar {
+                background-color: #34495e;
+                color: #ecf0f1;
+                border-bottom: 1px solid #2c3e50;
+                padding: 4px;
+            }
+            QMenuBar::item {
+                background-color: transparent;
+                padding: 4px 8px;
+                border-radius: 3px;
+            }
+            QMenuBar::item:selected {
+                background-color: #3498db;
+            }
+            QMenu {
+                background-color: #34495e;
+                color: #ecf0f1;
+                border: 1px solid #2c3e50;
+            }
+            QMenu::item {
+                padding: 6px 20px;
+            }
+            QMenu::item:selected {
+                background-color: #3498db;
+            }
+        """)
+        
+        # Window menu
+        window_menu = menubar.addMenu("Window")
+        
+        # Minimize action
+        minimize_action = window_menu.addAction("Minimize")
+        minimize_action.setShortcut("Ctrl+M")
+        minimize_action.triggered.connect(self.showMinimized)
+        
+        # Maximize/Restore action
+        self.maximize_action = window_menu.addAction("Maximize")
+        self.maximize_action.setShortcut("Ctrl+Shift+M")
+        self.maximize_action.triggered.connect(self.toggle_maximize)
+        
+        # Fullscreen action
+        fullscreen_action = window_menu.addAction("Toggle Fullscreen")
+        fullscreen_action.setShortcut("F11")
+        fullscreen_action.triggered.connect(self.toggle_fullscreen)
+        
+        window_menu.addSeparator()
+        
+        # Close action
+        close_action = window_menu.addAction("Close")
+        close_action.setShortcut("Ctrl+Q")
+        close_action.triggered.connect(self.close)
+        
+        # View menu
+        view_menu = menubar.addMenu("View")
+        
+        # Connect all action
+        connect_all_action = view_menu.addAction("Connect All Streams")
+        connect_all_action.setShortcut("Ctrl+A")
+        connect_all_action.triggered.connect(self.connect_all_streams)
+        
+        # Disconnect all action
+        disconnect_all_action = view_menu.addAction("Disconnect All Streams")
+        disconnect_all_action.setShortcut("Ctrl+D")
+        disconnect_all_action.triggered.connect(self.disconnect_all_streams)
+        
+        view_menu.addSeparator()
+        
+        # Save config action
+        save_action = view_menu.addAction("Save Configuration")
+        save_action.setShortcut("Ctrl+S")
+        save_action.triggered.connect(self.save_config)
+    
+    def toggle_maximize(self):
+        """Toggle between maximized and normal window state"""
+        if self.isMaximized():
+            self.showNormal()
+            self.maximize_action.setText("Maximize")
+        else:
+            self.showMaximized()
+            self.maximize_action.setText("Restore")
+        
+        # Update layout after state change
+        QTimer.singleShot(100, self.update_stream_layout)
+    
+    def toggle_fullscreen(self):
+        """Toggle fullscreen mode"""
+        if self.isFullScreen():
+            self.showNormal()
+        else:
+            self.showFullScreen()
+        
+        # Update layout after state change
+        QTimer.singleShot(100, self.update_stream_layout)
+    
+    def changeEvent(self, event):
+        """Handle window state changes"""
+        if event.type() == event.Type.WindowStateChange:
+            if self.isMaximized():
+                self.maximize_action.setText("Restore")
+            else:
+                self.maximize_action.setText("Maximize")
+            
+            # Update layout when window state changes
+            QTimer.singleShot(100, self.update_stream_layout)
+        
+        super().changeEvent(event)
+    
+    def showEvent(self, event):
+        """Handle window show event"""
+        super().showEvent(event)
+        # Update layout when window is first shown
+        QTimer.singleShot(100, self.update_stream_layout)
     
     def connect_all_streams(self):
         """Connect all streams"""
