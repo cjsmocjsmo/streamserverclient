@@ -444,6 +444,9 @@ class RTSPClientMainWindow(QMainWindow):
     def setup_ui(self):
         self.setWindowTitle("RTSP Video Stream Client")
         
+        # Set window flags for proper fullscreen behavior
+        self.setWindowFlags(Qt.WindowType.Window)
+        
         # Detect screen size and set window geometry
         screen = QApplication.primaryScreen()
         screen_geometry = screen.availableGeometry()
@@ -452,20 +455,21 @@ class RTSPClientMainWindow(QMainWindow):
         
         print(f"Detected screen size: {screen_width}x{screen_height}")
         
-        # Set initial size based on screen size (90% of available space)
+        # Set initial size for windowed mode (used when toggling out of fullscreen)
         window_width = int(screen_width * 0.9)
         window_height = int(screen_height * 0.9)
         
-        # Center the window
+        # Center the window for windowed mode
         x = (screen_width - window_width) // 2
         y = (screen_height - window_height) // 2
         
-        self.setGeometry(x, y, window_width, window_height)
+        # Store windowed geometry for later use
+        self.windowed_geometry = (x, y, window_width, window_height)
         
-        # Maximize the window for best viewing experience
-        self.showMaximized()
+        # Go directly to fullscreen without setting geometry first
+        self.showFullScreen()
         
-        print(f"Window set to: {window_width}x{window_height} at ({x}, {y}), then maximized")
+        print(f"Launched in fullscreen mode (windowed fallback: {window_width}x{window_height} at ({x}, {y}))")
         
         # Dark theme
         self.setStyleSheet("""
@@ -577,6 +581,33 @@ class RTSPClientMainWindow(QMainWindow):
             if widget.is_connected:
                 widget.disconnect_stream()
     
+    def keyPressEvent(self, event):
+        """Handle keyboard events"""
+        if event.key() == Qt.Key.Key_Escape:
+            # Toggle between fullscreen and windowed mode
+            if self.isFullScreen():
+                self.showNormal()
+                # Restore windowed geometry
+                x, y, width, height = self.windowed_geometry
+                self.setGeometry(x, y, width, height)
+                print("Exited fullscreen mode")
+            else:
+                self.showFullScreen()
+                print("Entered fullscreen mode")
+        elif event.key() == Qt.Key.Key_F11:
+            # F11 also toggles fullscreen
+            if self.isFullScreen():
+                self.showNormal()
+                # Restore windowed geometry
+                x, y, width, height = self.windowed_geometry
+                self.setGeometry(x, y, width, height)
+                print("Exited fullscreen mode")
+            else:
+                self.showFullScreen()
+                print("Entered fullscreen mode")
+        else:
+            super().keyPressEvent(event)
+    
     def closeEvent(self, event):
         """Clean up when closing"""
         self.disconnect_all_streams()
@@ -604,7 +635,7 @@ def main():
     app.setApplicationVersion("1.0")
     
     window = RTSPClientMainWindow()
-    # Note: showMaximized() is called in setup_ui(), not here
+    # Note: showFullScreen() is called in setup_ui(), not here
     window.show()
     
     sys.exit(app.exec())
