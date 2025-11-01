@@ -35,34 +35,103 @@ class RTSPStreamWorker(QThread):
         self.statusChanged.emit(self.stream_id, "Connecting...")
         
         try:
-            # Configure OpenCV for RTSP
-            self.cap = cv2.VideoCapture(self.rtsp_url)
-            self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # Reduce buffer for real-time
-            self.cap.set(cv2.CAP_PROP_FPS, 30)
+            # Validate RTSP URL format
+            if not self.rtsp_url or not self.rtsp_url.startswith('rtsp://'):
+                self.statusChanged.emit(self.stream_id, "Invalid RTSP URL")
+                return
             
-            if not self.cap.isOpened():
-                self.statusChanged.emit(self.stream_id, "Failed to connect")
+            # Configure OpenCV for RTSP with better error handling
+            print(f"Attempting to connect to: {self.rtsp_url}")
+            
+            # Try different backends for better compatibility
+            backends_to_try = [
+                cv2.CAP_GSTREAMER,  # GStreamer backend
+                cv2.CAP_FFMPEG,     # FFmpeg backend
+                cv2.CAP_ANY         # Any available backend
+            ]
+            
+            self.cap = None
+            for backend in backends_to_try:
+                try:
+                    print(f"Trying backend: {backend}")
+                    self.cap = cv2.VideoCapture(self.rtsp_url, backend)
+                    
+                    # Configure capture properties
+                    self.cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)  # Reduce buffer for real-time
+                    self.cap.set(cv2.CAP_PROP_FPS, 25)  # Lower FPS for better stability
+                    
+                    # Set timeout properties if available
+                    try:
+                        self.cap.set(cv2.CAP_PROP_OPEN_TIMEOUT_MSEC, 5000)  # 5 second timeout
+                        self.cap.set(cv2.CAP_PROP_READ_TIMEOUT_MSEC, 5000)   # 5 second read timeout
+                    except:
+                        pass  # These properties might not be available in all OpenCV versions
+                    
+                    # Test if we can actually read from the stream
+                    if self.cap.isOpened():
+                        ret, test_frame = self.cap.read()
+                        if ret and test_frame is not None:
+                            print(f"Successfully connected with backend: {backend}")
+                            break
+                        else:
+                            print(f"Backend {backend} opened but couldn't read frame")
+                            self.cap.release()
+                            self.cap = None
+                    else:
+                        print(f"Backend {backend} failed to open")
+                        if self.cap:
+                            self.cap.release()
+                        self.cap = None
+                        
+                except Exception as e:
+                    print(f"Backend {backend} error: {e}")
+                    if self.cap:
+                        self.cap.release()
+                    self.cap = None
+                    continue
+            
+            if not self.cap or not self.cap.isOpened():
+                self.statusChanged.emit(self.stream_id, "Failed to connect to RTSP stream")
+                print(f"All backends failed for {self.rtsp_url}")
                 return
                 
             self.statusChanged.emit(self.stream_id, "Connected")
+            print(f"Stream {self.stream_id} connected successfully")
+            
+            frame_count = 0
+            consecutive_failures = 0
+            max_consecutive_failures = 10
             
             while self.running:
                 ret, frame = self.cap.read()
                 
-                if ret:
+                if ret and frame is not None:
                     # Resize frame for display
                     frame = cv2.resize(frame, (640, 480))
                     self.frameReady.emit(frame, self.stream_id)
                     self.statusChanged.emit(self.stream_id, "Streaming")
+                    consecutive_failures = 0
+                    frame_count += 1
                 else:
-                    self.statusChanged.emit(self.stream_id, "No signal")
-                    self.msleep(1000)  # Wait 1 second before retry
+                    consecutive_failures += 1
+                    print(f"Stream {self.stream_id} read failure {consecutive_failures}")
+                    
+                    if consecutive_failures >= max_consecutive_failures:
+                        self.statusChanged.emit(self.stream_id, "Connection lost")
+                        print(f"Stream {self.stream_id} lost after {consecutive_failures} failures")
+                        break
+                    else:
+                        self.statusChanged.emit(self.stream_id, "No signal")
+                        self.msleep(1000)  # Wait 1 second before retry
                     
         except Exception as e:
-            self.statusChanged.emit(self.stream_id, f"Error: {str(e)}")
+            error_msg = f"Stream error: {str(e)}"
+            print(f"Stream {self.stream_id} exception: {error_msg}")
+            self.statusChanged.emit(self.stream_id, error_msg)
         finally:
             if self.cap:
                 self.cap.release()
+                print(f"Stream {self.stream_id} released")
             self.statusChanged.emit(self.stream_id, "Disconnected")
     
     def stop(self):
@@ -83,6 +152,11 @@ class StreamWidget(QFrame):
         self.rtsp_url = rtsp_url
         self.worker = None
         self.is_connected = False
+        self.retry_timer = QTimer()
+        self.retry_timer.setSingleShot(True)
+        self.retry_timer.timeout.connect(self.auto_retry)
+        self.retry_count = 0
+        self.max_retries = 5
         
         self.setup_ui()
         
@@ -302,10 +376,20 @@ class StreamWidget(QFrame):
         # Color-code status
         if status in ["Connected", "Streaming"]:
             color = "#27ae60"  # Green
+            self.retry_count = 0  # Reset retry count on success
         elif status == "Connecting...":
             color = "#f39c12"  # Orange
         else:
             color = "#e74c3c"  # Red
+            # Schedule retry for connection failures
+            if ("Failed" in status or "Error" in status or "lost" in status) and self.is_connected:
+                if not self.retry_timer.isActive() and self.retry_count < self.max_retries:
+                    retry_delay = min(5000 * (self.retry_count + 1), 30000)  # Exponential backoff, max 30s
+                    print(f"Scheduling retry for stream {self.stream_id} in {retry_delay/1000}s (attempt {self.retry_count + 1}/{self.max_retries})")
+                    self.retry_timer.start(retry_delay)
+                elif self.retry_count >= self.max_retries:
+                    print(f"Stream {self.stream_id} exceeded max retries")
+                    self.status_label.setText(f"{status} - Max retries exceeded")
             
         self.status_label.setStyleSheet(f"""
             QLabel {{
@@ -316,6 +400,24 @@ class StreamWidget(QFrame):
                 font-size: 12px;
             }}
         """)
+    
+    def auto_retry(self):
+        """Automatically retry connection"""
+        if self.is_connected and self.retry_count < self.max_retries:
+            self.retry_count += 1
+            print(f"Auto-retrying stream {self.stream_id} (attempt {self.retry_count}/{self.max_retries})")
+            self.status_label.setText(f"Retrying... (attempt {self.retry_count}/{self.max_retries})")
+            
+            # Disconnect and reconnect
+            if self.worker:
+                self.worker.stop()
+                self.worker = None
+            
+            # Start new connection
+            self.worker = RTSPStreamWorker(self.stream_id, self.rtsp_url)
+            self.worker.frameReady.connect(self.update_frame)
+            self.worker.statusChanged.connect(self.update_status)
+            self.worker.start()
     
     def show_settings(self):
         """Show settings dialog for this stream"""
