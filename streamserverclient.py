@@ -12,14 +12,18 @@ import threading
 import queue
 import numpy as np
 import cv2
+import argparse
 
 # Detect desktop environment
 def detect_desktop_environment():
     desktop = os.environ.get('XDG_CURRENT_DESKTOP', '').lower()
     session = os.environ.get('DESKTOP_SESSION', '').lower()
     gdm = os.environ.get('GDMSESSION', '').lower()
+    wayland = os.environ.get('WAYLAND_DISPLAY', '')
     
-    if 'gnome' in desktop or 'gnome' in session or 'gnome' in gdm:
+    # Check for GNOME in various ways
+    if ('gnome' in desktop or 'gnome' in session or 'gnome' in gdm or 
+        desktop == 'ubuntu:gnome' or 'gnome-session' in os.environ.get('XDG_SESSION_DESKTOP', '').lower()):
         return 'gnome'
     elif 'kde' in desktop or 'plasma' in desktop:
         return 'kde'
@@ -27,6 +31,9 @@ def detect_desktop_environment():
         return 'xfce'
     elif 'lxde' in desktop or 'lxqt' in desktop:
         return 'lxde'
+    elif wayland:
+        # If running on Wayland, likely GNOME
+        return 'gnome'
     else:
         return 'unknown'
 
@@ -464,10 +471,11 @@ class StreamWidget(QFrame):
 class RTSPClientMainWindow(QMainWindow):
     """Main window for the RTSP client application"""
     
-    def __init__(self):
+    def __init__(self, desktop_env=None):
         super().__init__()
         self.stream_widgets = []
         self.config_file = "config.json"
+        self.desktop_env = desktop_env or detect_desktop_environment()
         
         self.setup_ui()
         self.load_config()
@@ -476,8 +484,7 @@ class RTSPClientMainWindow(QMainWindow):
         self.setWindowTitle("RTSP Video Stream Client")
         
         # Desktop environment specific window flags
-        desktop_env = detect_desktop_environment()
-        if desktop_env == 'gnome':
+        if self.desktop_env == 'gnome':
             # GNOME-specific window flags
             self.setWindowFlags(
                 Qt.WindowType.Window |
@@ -729,6 +736,14 @@ class RTSPClientMainWindow(QMainWindow):
         event.accept()
 
 def main():
+    # Parse command line arguments
+    parser = argparse.ArgumentParser(description='RTSP Video Stream Client')
+    parser.add_argument('--force-gnome', action='store_true', 
+                       help='Force GNOME window management mode')
+    parser.add_argument('--desktop', choices=['gnome', 'kde', 'xfce', 'auto'],
+                       default='auto', help='Force specific desktop environment handling')
+    args = parser.parse_args()
+    
     app = QApplication(sys.argv)
     app.setStyle('Fusion')
     
@@ -749,10 +764,19 @@ def main():
     app.setApplicationName("RTSP Stream Client")
     app.setApplicationVersion("1.0")
     
-    window = RTSPClientMainWindow()
+    # Desktop environment detection with command line override
+    if args.force_gnome or args.desktop == 'gnome':
+        desktop_env = 'gnome'
+        print("Forced GNOME mode via command line")
+    elif args.desktop != 'auto':
+        desktop_env = args.desktop
+        print(f"Forced {args.desktop} mode via command line")
+    else:
+        desktop_env = detect_desktop_environment()
     
-    # Desktop environment specific window management
-    desktop_env = detect_desktop_environment()
+    print(f"Using desktop environment: {desktop_env}")
+    
+    window = RTSPClientMainWindow(desktop_env)
     
     if desktop_env == 'gnome':
         # GNOME-specific sequence for proper window handling
