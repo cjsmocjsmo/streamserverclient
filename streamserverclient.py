@@ -373,7 +373,7 @@ class RTSPClientMainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.stream_widgets = []
-        self.config_file = "rtsp_config.json"
+        self.config_file = "config.json"  # Use the existing config.json file
         
         self.setup_ui()
         self.load_config()
@@ -511,11 +511,40 @@ class RTSPClientMainWindow(QMainWindow):
     
     def create_stream_widgets(self):
         """Create the three stream widgets"""
-        stream_configs = [
-            ("stream1", "Camera 1", ""),
-            ("stream2", "Camera 2", ""),
-            ("stream3", "Camera 3", "")
-        ]
+        # Try to load existing config first
+        stream_configs = []
+        try:
+            if os.path.exists(self.config_file):
+                with open(self.config_file, 'r') as f:
+                    config = json.load(f)
+                
+                streams = config.get("streams", {})
+                for i in range(1, 4):  # stream1, stream2, stream3
+                    stream_key = f"stream{i}"
+                    if stream_key in streams:
+                        stream_data = streams[stream_key]
+                        stream_configs.append((
+                            stream_key,
+                            stream_data.get("name", f"Camera {i}"),
+                            stream_data.get("url", "")
+                        ))
+                    else:
+                        stream_configs.append((stream_key, f"Camera {i}", ""))
+            else:
+                # Default configuration if no config file exists
+                stream_configs = [
+                    ("stream1", "Camera 1", ""),
+                    ("stream2", "Camera 2", ""),
+                    ("stream3", "Camera 3", "")
+                ]
+        except Exception as e:
+            print(f"Error loading config during widget creation: {e}")
+            # Fallback to default configuration
+            stream_configs = [
+                ("stream1", "Camera 1", ""),
+                ("stream2", "Camera 2", ""),
+                ("stream3", "Camera 3", "")
+            ]
         
         for stream_id, name, url in stream_configs:
             widget = StreamWidget(stream_id, name, url)
@@ -720,17 +749,45 @@ class RTSPClientMainWindow(QMainWindow):
     
     def save_config(self):
         """Save current configuration to JSON file"""
-        config = {
-            "streams": {}
-        }
+        # Load existing config to preserve server settings and other fields
+        existing_config = {}
+        try:
+            if os.path.exists(self.config_file):
+                with open(self.config_file, 'r') as f:
+                    existing_config = json.load(f)
+        except Exception:
+            pass
+        
+        # Update stream configurations while preserving existing structure
+        if "streams" not in existing_config:
+            existing_config["streams"] = {}
         
         for i, widget in enumerate(self.stream_widgets):
-            stream_config = widget.get_config()
-            config["streams"][f"stream{i+1}"] = stream_config
+            stream_key = f"stream{i+1}"
+            widget_config = widget.get_config()
+            
+            # Preserve description if it exists, otherwise use a default
+            if stream_key in existing_config["streams"]:
+                description = existing_config["streams"][stream_key].get("description", f"{widget_config['name']} camera")
+            else:
+                description = f"{widget_config['name']} camera"
+            
+            existing_config["streams"][stream_key] = {
+                "name": widget_config["name"],
+                "url": widget_config["url"],
+                "description": description
+            }
+        
+        # Preserve server settings if they exist
+        if "server" not in existing_config:
+            existing_config["server"] = {
+                "port": 8000,
+                "host": "0.0.0.0"
+            }
         
         try:
             with open(self.config_file, 'w') as f:
-                json.dump(config, f, indent=4)
+                json.dump(existing_config, f, indent=2)
             self.statusBar().showMessage("Configuration saved successfully")
             QMessageBox.information(self, "Success", "Configuration saved successfully!")
         except Exception as e:
@@ -740,25 +797,14 @@ class RTSPClientMainWindow(QMainWindow):
         """Load configuration from JSON file"""
         try:
             if os.path.exists(self.config_file):
-                with open(self.config_file, 'r') as f:
-                    config = json.load(f)
-                
-                streams = config.get("streams", {})
-                for i, widget in enumerate(self.stream_widgets):
-                    stream_key = f"stream{i+1}"
-                    if stream_key in streams:
-                        stream_config = streams[stream_key]
-                        widget.stream_name = stream_config.get("name", f"Camera {i+1}")
-                        widget.rtsp_url = stream_config.get("url", "")
-                        widget.title_label.setText(f"📹 {widget.stream_name}")
-                
                 self.statusBar().showMessage("Configuration loaded successfully")
             else:
-                # Create default config
-                self.save_config()
+                # Create default config if it doesn't exist
+                self.statusBar().showMessage("Created default configuration")
                 
         except Exception as e:
             QMessageBox.warning(self, "Warning", f"Failed to load configuration: {str(e)}")
+            self.statusBar().showMessage("Using default configuration")
     
     def closeEvent(self, event):
         """Handle application close event"""
