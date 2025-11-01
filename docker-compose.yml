@@ -1,0 +1,91 @@
+version: '3.8'
+
+services:
+  rtsp-client:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: rtsp-stream-client
+    restart: unless-stopped
+    
+    # Environment variables
+    environment:
+      - DISPLAY=${DISPLAY:-:99}
+      - QT_QPA_PLATFORM=xcb
+      - QT_QPA_PLATFORMTHEME=gtk3
+      - QT_X11_NO_MITSHM=1
+      - QT_SCALE_FACTOR=1
+      - QT_AUTO_SCREEN_SCALE_FACTOR=0
+    
+    # Network configuration
+    network_mode: host
+    
+    # Volume mounts
+    volumes:
+      # X11 socket for GUI forwarding (Linux only)
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      # Configuration file (can be overridden)
+      - ./config.json:/app/config.json:ro
+      # Optional: mount logs directory
+      - ./logs:/app/logs:rw
+    
+    # Device access
+    devices:
+      # GPU access for hardware acceleration (if available)
+      - /dev/dri:/dev/dri
+    
+    # Security options
+    security_opt:
+      - seccomp:unconfined
+    
+    # IPC mode for X11
+    ipc: host
+    
+    # Privileged mode for hardware access (use with caution)
+    # privileged: true
+    
+    # Command override (uncomment to use specific options)
+    # command: ["--force-gnome"]
+    
+    # Logging configuration
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Optional: Development service with volume mounting for live development
+  rtsp-client-dev:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: rtsp-stream-client-dev
+    restart: "no"
+    profiles:
+      - development
+    
+    environment:
+      - DISPLAY=${DISPLAY:-:99}
+      - QT_QPA_PLATFORM=xcb
+      - QT_QPA_PLATFORMTHEME=gtk3
+      - QT_X11_NO_MITSHM=1
+    
+    network_mode: host
+    
+    volumes:
+      - /tmp/.X11-unix:/tmp/.X11-unix:rw
+      # Mount source code for live development
+      - ./streamserverclient.py:/app/streamserverclient.py:ro
+      - ./config.json:/app/config.json:ro
+      - ./logs:/app/logs:rw
+    
+    devices:
+      - /dev/dri:/dev/dri
+    
+    security_opt:
+      - seccomp:unconfined
+    
+    ipc: host
+    
+    # Override entrypoint for development
+    command: ["--desktop", "auto"]

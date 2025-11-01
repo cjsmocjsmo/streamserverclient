@@ -1,9 +1,0 @@
-# RTSP Video Stream Client - Python Dependencies
-# 
-# RECOMMENDED: Use Debian packages instead of pip3
-# sudo apt install python3-pyqt6 python3-opencv python3-numpy
-#
-# Use pip3 only if packages are not available in your Debian repositories
-PyQt6>=6.5.0
-opencv-python>=4.8.0
-numpy>=1.24.0
