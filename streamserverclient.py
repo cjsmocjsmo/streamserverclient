@@ -20,26 +20,48 @@ from PyQt6.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout,
                             QHBoxLayout, QLabel, QPushButton, QGridLayout,
                             QFrame, QMessageBox, QMenuBar, QToolBar)
 from PyQt6.QtCore import QThread, pyqtSignal, QTimer, Qt
-from PyQt6.QtGui import QPixmap, QImage, QAction, QFont
+from PyQt6.QtGui import QPixmap, QImage, QAction, QFont, QScreen
 from PyQt6.QtWidgets import QSizePolicy
 
 class FFmpegRTSPBridge:
-    """FFmpeg RTSP bridge for reliable video streaming"""
+    """FFmpeg RTSP bridge for reliable video streaming with preserved aspect ratio"""
     
-    def __init__(self, rtsp_url, width=640, height=480):
+    def __init__(self, rtsp_url, callback, max_width=1280, max_height=720):
         self.rtsp_url = rtsp_url
-        self.width = width
-        self.height = height
+        self.callback = callback  # Callback function to send frames to
+        self.max_width = max_width
+        self.max_height = max_height
+        self.actual_width = None
+        self.actual_height = None
         self.process = None
-        self.frame_queue = queue.Queue(maxsize=3)
         self.running = False
         self.thread = None
         
     def start(self):
+        # First, probe the stream to get its original resolution
+        try:
+            probe_result = self._probe_stream_resolution()
+            if probe_result:
+                orig_width, orig_height = probe_result
+                print(f"Using original resolution: {orig_width}x{orig_height}")
+                self.actual_width = orig_width
+                self.actual_height = orig_height
+            else:
+                # Fallback to default resolution
+                self.actual_width = 640
+                self.actual_height = 480
+                
+            print(f"Using resolution: {self.actual_width}x{self.actual_height}")
+            
+        except Exception as e:
+            print(f"Resolution detection failed: {e}, using default 640x480")
+            self.actual_width = 640
+            self.actual_height = 480
+        
+        # Use FFmpeg with original resolution (no scaling)
         command = [
             'ffmpeg',
             '-i', self.rtsp_url,
-            '-vf', f'scale={self.width}:{self.height}',
             '-pix_fmt', 'bgr24',
             '-f', 'rawvideo',
             '-an',
@@ -64,43 +86,52 @@ class FFmpegRTSPBridge:
             print(f"FFmpeg start error: {e}")
             return False
     
+    def _probe_stream_resolution(self):
+        """Probe the stream to get its original resolution"""
+        try:
+            probe_cmd = [
+                'ffprobe',
+                '-v', 'quiet',
+                '-print_format', 'json',
+                '-show_streams',
+                '-select_streams', 'v:0',
+                self.rtsp_url
+            ]
+            
+            result = subprocess.run(probe_cmd, capture_output=True, text=True, timeout=10)
+            if result.returncode == 0:
+                import json
+                data = json.loads(result.stdout)
+                if 'streams' in data and len(data['streams']) > 0:
+                    stream = data['streams'][0]
+                    width = stream.get('width')
+                    height = stream.get('height')
+                    if width and height:
+                        return width, height
+            return None
+            
+        except Exception as e:
+            print(f"Stream probing failed: {e}")
+            return None
+    
     def _read_frames(self):
-        frame_size = self.width * self.height * 3
+        frame_size = self.actual_width * self.actual_height * 3
         
-        while self.running and self.process:
+        while self.running:
             try:
                 raw_frame = self.process.stdout.read(frame_size)
                 if len(raw_frame) != frame_size:
                     break
                 
-                frame = np.frombuffer(raw_frame, dtype=np.uint8)
-                frame = frame.reshape((self.height, self.width, 3))
+                frame = np.frombuffer(raw_frame, dtype=np.uint8).reshape((self.actual_height, self.actual_width, 3))
+                self.callback(frame)
                 
-                try:
-                    self.frame_queue.put_nowait(frame)
-                except queue.Full:
-                    try:
-                        self.frame_queue.get_nowait()
-                        self.frame_queue.put_nowait(frame)
-                    except queue.Empty:
-                        pass
-                        
             except Exception as e:
-                if self.running:
-                    print(f"Frame read error: {e}")
+                print(f"Frame reading error: {e}")
                 break
     
-    def read(self):
-        try:
-            frame = self.frame_queue.get_nowait()
-            return True, frame
-        except queue.Empty:
-            return False, None
-    
-    def isOpened(self):
-        return self.running and self.process and self.process.poll() is None
-    
-    def release(self):
+    def stop(self):
+        """Stop the FFmpeg bridge and cleanup resources"""
         self.running = False
         if self.process:
             try:
@@ -108,6 +139,8 @@ class FFmpegRTSPBridge:
                 self.process.wait(timeout=2)
             except:
                 pass
+        if self.thread and self.thread.is_alive():
+            self.thread.join(timeout=1)
 
 class RTSPStreamWorker(QThread):
     """Worker thread for RTSP stream processing using FFmpeg bridge"""
@@ -121,6 +154,11 @@ class RTSPStreamWorker(QThread):
         self.fallback_url = fallback_url
         self.running = False
         self.bridge = None
+        
+    def frame_received(self, frame):
+        """Callback for when a frame is received from the FFmpeg bridge"""
+        if self.running:
+            self.frameReady.emit(frame, self.stream_id)
         
     def run(self):
         self.running = True
@@ -138,56 +176,40 @@ class RTSPStreamWorker(QThread):
             print(f"Stream {self.stream_id}: Trying {url_type} URL: {url}")
             self.statusChanged.emit(self.stream_id, f"Connecting to {url_type.lower()}...")
             
-            self.bridge = FFmpegRTSPBridge(url, 640, 480)
+            self.bridge = FFmpegRTSPBridge(
+                url, 
+                self.frame_received,
+                max_width=1280,  # Use original camera resolution
+                max_height=720   # Use original camera resolution
+            )
             
             if self.bridge.start():
                 self.statusChanged.emit(self.stream_id, f"Connected ({url_type})")
                 print(f"Stream {self.stream_id}: Connected via {url_type}")
                 
-                # Wait for FFmpeg to start
-                self.msleep(1000)
+                # Keep the connection alive while streaming
+                while self.running and self.bridge.running:
+                    self.statusChanged.emit(self.stream_id, f"Streaming ({url_type})")
+                    self.msleep(1000)  # Check every second
                 
-                # Main streaming loop
-                frame_count = 0
-                no_frame_count = 0
-                
-                while self.running and self.bridge.isOpened():
-                    ret, frame = self.bridge.read()
-                    
-                    if ret and frame is not None:
-                        self.frameReady.emit(frame, self.stream_id)
-                        self.statusChanged.emit(self.stream_id, f"Streaming ({url_type})")
-                        frame_count += 1
-                        no_frame_count = 0
-                        
-                        if frame_count % 60 == 0:  # Log every 2 seconds
-                            print(f"Stream {self.stream_id}: {frame_count} frames")
-                    else:
-                        no_frame_count += 1
-                        if no_frame_count > 150:  # 5 seconds without frames
-                            print(f"Stream {self.stream_id}: No frames for 5 seconds")
-                            break
-                    
-                    self.msleep(33)  # ~30 FPS
-                
-                self.bridge.release()
+                self.bridge.stop()
                 break  # Successfully connected, don't try fallback
             else:
                 print(f"Stream {self.stream_id}: Failed to connect to {url_type}")
                 if self.bridge:
-                    self.bridge.release()
+                    self.bridge.stop()
                 
         else:
             self.statusChanged.emit(self.stream_id, "All connection attempts failed")
         
         if self.bridge:
-            self.bridge.release()
+            self.bridge.stop()
         self.statusChanged.emit(self.stream_id, "Disconnected")
     
     def stop(self):
         self.running = False
         if self.bridge:
-            self.bridge.release()
+            self.bridge.stop()
         self.quit()
         self.wait()
 
@@ -421,7 +443,29 @@ class RTSPClientMainWindow(QMainWindow):
         
     def setup_ui(self):
         self.setWindowTitle("RTSP Video Stream Client")
-        self.setGeometry(100, 100, 1800, 700)  # Wider window for horizontal layout
+        
+        # Detect screen size and set window geometry
+        screen = QApplication.primaryScreen()
+        screen_geometry = screen.availableGeometry()
+        screen_width = screen_geometry.width()
+        screen_height = screen_geometry.height()
+        
+        print(f"Detected screen size: {screen_width}x{screen_height}")
+        
+        # Set initial size based on screen size (90% of available space)
+        window_width = int(screen_width * 0.9)
+        window_height = int(screen_height * 0.9)
+        
+        # Center the window
+        x = (screen_width - window_width) // 2
+        y = (screen_height - window_height) // 2
+        
+        self.setGeometry(x, y, window_width, window_height)
+        
+        # Maximize the window for best viewing experience
+        self.showMaximized()
+        
+        print(f"Window set to: {window_width}x{window_height} at ({x}, {y}), then maximized")
         
         # Dark theme
         self.setStyleSheet("""
@@ -542,11 +586,25 @@ def main():
     app = QApplication(sys.argv)
     app.setStyle('Fusion')
     
+    # Detect and log screen information
+    screen = app.primaryScreen()
+    screen_geometry = screen.availableGeometry()
+    screen_size = screen.size()
+    dpi = screen.logicalDotsPerInch()
+    
+    print(f"=== Screen Detection ===")
+    print(f"Screen size: {screen_size.width()}x{screen_size.height()}")
+    print(f"Available area: {screen_geometry.width()}x{screen_geometry.height()}")
+    print(f"DPI: {dpi}")
+    print(f"Device pixel ratio: {screen.devicePixelRatio()}")
+    print("========================")
+    
     # Set application properties
     app.setApplicationName("RTSP Stream Client")
     app.setApplicationVersion("1.0")
     
     window = RTSPClientMainWindow()
+    # Note: showMaximized() is called in setup_ui(), not here
     window.show()
     
     sys.exit(app.exec())
