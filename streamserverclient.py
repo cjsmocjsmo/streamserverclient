@@ -444,8 +444,13 @@ class RTSPClientMainWindow(QMainWindow):
     def setup_ui(self):
         self.setWindowTitle("RTSP Video Stream Client")
         
-        # Set window flags for proper fullscreen behavior
-        self.setWindowFlags(Qt.WindowType.Window)
+        # Set window flags to include standard controls (minimize, maximize, close)
+        self.setWindowFlags(
+            Qt.WindowType.Window |
+            Qt.WindowType.WindowMinimizeButtonHint |
+            Qt.WindowType.WindowMaximizeButtonHint |
+            Qt.WindowType.WindowCloseButtonHint
+        )
         
         # Detect screen size and set window geometry
         screen = QApplication.primaryScreen()
@@ -466,10 +471,11 @@ class RTSPClientMainWindow(QMainWindow):
         # Store windowed geometry for later use
         self.windowed_geometry = (x, y, window_width, window_height)
         
-        # Go directly to fullscreen without setting geometry first
-        self.showFullScreen()
+        # Start maximized to show window controls, can go fullscreen with F11/Escape
+        self.showMaximized()
         
-        print(f"Launched in fullscreen mode (windowed fallback: {window_width}x{window_height} at ({x}, {y}))")
+        print(f"Window maximized with controls visible (windowed fallback: {window_width}x{window_height} at ({x}, {y}))")
+        print("Press F11 or Escape to toggle fullscreen mode")
         
         # Dark theme
         self.setStyleSheet("""
@@ -635,7 +641,7 @@ def main():
     app.setApplicationVersion("1.0")
     
     window = RTSPClientMainWindow()
-    # Note: showFullScreen() is called in setup_ui(), not here
+    # Note: showMaximized() is called in setup_ui(), window controls are visible
     window.show()
     
     sys.exit(app.exec())
