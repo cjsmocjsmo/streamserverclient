@@ -260,8 +260,9 @@ class StreamWidget(QFrame):
         # Video display area
         self.video_label = QLabel("Click Connect to start streaming")
         self.video_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.video_label.setMinimumSize(480, 360)  # Better aspect ratio for horizontal layout
+        self.video_label.setMinimumSize(320, 240)  # Smaller minimum size for better responsiveness
         self.video_label.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        self.video_label.setScaledContents(False)  # Maintain aspect ratio
         self.video_label.setStyleSheet("""
             QLabel {
                 background-color: #000000;
@@ -513,6 +514,24 @@ class RTSPClientMainWindow(QMainWindow):
         exit_action = QAction('Exit', self)
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
+        
+        # View menu
+        view_menu = menubar.addMenu('View')
+        
+        # Window controls
+        minimize_action = QAction('Minimize Window', self)
+        minimize_action.triggered.connect(self.showMinimized)
+        view_menu.addAction(minimize_action)
+        
+        maximize_action = QAction('Maximize Window', self)
+        maximize_action.triggered.connect(self.toggle_maximize)
+        view_menu.addAction(maximize_action)
+        
+        view_menu.addSeparator()
+        
+        fullscreen_action = QAction('Toggle Fullscreen', self)
+        fullscreen_action.triggered.connect(self.toggle_fullscreen)
+        view_menu.addAction(fullscreen_action)
     
     def load_config(self):
         """Load configuration from JSON file"""
@@ -565,13 +584,45 @@ class RTSPClientMainWindow(QMainWindow):
                 if widget:
                     widget.setParent(None)
         
-        # Add all streams horizontally
+        # Add all streams horizontally with equal stretch
         for widget in self.stream_widgets:
-            self.main_layout.addWidget(widget)
+            self.main_layout.addWidget(widget, 1)  # Equal stretch factor
             
-        # Ensure equal spacing
-        self.main_layout.setSpacing(10)
-        self.main_layout.setContentsMargins(10, 10, 10, 10)
+        # Ensure equal spacing and margins that respect screen boundaries
+        self.main_layout.setSpacing(5)  # Smaller spacing to fit better
+        self.main_layout.setContentsMargins(5, 5, 5, 5)  # Smaller margins
+        
+        # Ensure the main window respects screen boundaries
+        self.adjust_window_size()
+    
+    def adjust_window_size(self):
+        """Adjust window size to fit content within screen boundaries"""
+        screen = QApplication.primaryScreen()
+        available_geometry = screen.availableGeometry()
+        
+        # Calculate preferred size based on number of streams
+        num_streams = len(self.stream_widgets)
+        if num_streams > 0:
+            # Calculate width that fits all streams comfortably
+            min_stream_width = 320  # Minimum width per stream
+            preferred_width = min(
+                num_streams * (min_stream_width + 20),  # Stream width + margins
+                available_geometry.width() - 40  # Leave some screen margin
+            )
+            
+            # Set reasonable height
+            preferred_height = min(
+                int(preferred_width * 0.6),  # Maintain reasonable aspect ratio
+                available_geometry.height() - 80  # Leave space for title bar, etc.
+            )
+            
+            # Only resize if not maximized or fullscreen
+            if not self.isMaximized() and not self.isFullScreen():
+                self.resize(preferred_width, preferred_height)
+                # Center the window
+                x = (available_geometry.width() - preferred_width) // 2
+                y = (available_geometry.height() - preferred_height) // 2
+                self.move(x, y)
     
     def connect_all_streams(self):
         """Connect all streams"""
@@ -584,6 +635,27 @@ class RTSPClientMainWindow(QMainWindow):
         for widget in self.stream_widgets:
             if widget.is_connected:
                 widget.disconnect_stream()
+    
+    def toggle_maximize(self):
+        """Toggle between maximized and normal window state"""
+        if self.isMaximized():
+            self.showNormal()
+            print("Window restored to normal size")
+        else:
+            self.showMaximized()
+            print("Window maximized")
+    
+    def toggle_fullscreen(self):
+        """Toggle fullscreen mode"""
+        if self.isFullScreen():
+            self.showNormal()
+            # Restore windowed geometry
+            x, y, width, height = self.windowed_geometry
+            self.setGeometry(x, y, width, height)
+            print("Exited fullscreen mode")
+        else:
+            self.showFullScreen()
+            print("Entered fullscreen mode")
     
     def keyPressEvent(self, event):
         """Handle keyboard events"""
