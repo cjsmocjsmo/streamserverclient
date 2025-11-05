@@ -53,6 +53,7 @@ public:
 private:
     bool load_camera_config();
     void setup_ui();
+    void apply_dark_theme();
     void create_video_area();
     void create_camera_buttons();
     
@@ -121,11 +122,19 @@ bool RTSPStreamClient::load_camera_config() {
 }
 
 void RTSPStreamClient::setup_ui() {
+    // Apply dark theme CSS
+    apply_dark_theme();
+    
     // Create main window
     window = gtk_window_new(GTK_WINDOW_TOPLEVEL);
     gtk_window_set_title(GTK_WINDOW(window), "RTSP Stream Client - C++");
     gtk_window_set_default_size(GTK_WINDOW(window), 1000, 700);
     gtk_window_set_position(GTK_WINDOW(window), GTK_WIN_POS_CENTER);
+    
+    // Set dark window background
+    GdkRGBA window_color;
+    gdk_rgba_parse(&window_color, "#1e1e1e");
+    gtk_widget_override_background_color(window, GTK_STATE_FLAG_NORMAL, &window_color);
     
     // Connect destroy signal
     g_signal_connect(window, "destroy", G_CALLBACK(on_window_destroy), this);
@@ -133,19 +142,98 @@ void RTSPStreamClient::setup_ui() {
     // Create main vertical box
     main_box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
     gtk_container_set_border_width(GTK_CONTAINER(main_box), 10);
+    
+    // Set dark background for main box
+    gtk_widget_override_background_color(main_box, GTK_STATE_FLAG_NORMAL, &window_color);
+    
     gtk_container_add(GTK_CONTAINER(window), main_box);
+    
+    // Create camera buttons (moved to top)
+    create_camera_buttons();
     
     // Create video area
     create_video_area();
     
-    // Create camera buttons
-    create_camera_buttons();
-    
     // Create status label
     status_label = gtk_label_new("Ready to connect to camera");
+    
+    // Style status label with white text
+    GdkRGBA white_text;
+    gdk_rgba_parse(&white_text, "#ffffff");
+    gtk_widget_override_color(status_label, GTK_STATE_FLAG_NORMAL, &white_text);
+    
     gtk_box_pack_start(GTK_BOX(main_box), status_label, FALSE, FALSE, 0);
     
     std::cout << "📺 UI setup complete with " << cameras.size() << " cameras" << std::endl;
+}
+
+void RTSPStreamClient::apply_dark_theme() {
+    // Create CSS provider for dark theme
+    GtkCssProvider* css_provider = gtk_css_provider_new();
+    
+    const char* css_data = 
+        "* {"
+        "  background-color: #1e1e1e;"
+        "  color: #ffffff;"
+        "}"
+        "window {"
+        "  background-color: #1e1e1e;"
+        "}"
+        "box {"
+        "  background-color: #1e1e1e;"
+        "}"
+        "frame {"
+        "  background-color: #2d2d2d;"
+        "  border: 1px solid #404040;"
+        "  border-radius: 4px;"
+        "}"
+        "frame > border {"
+        "  background-color: #2d2d2d;"
+        "}"
+        "frame > label {"
+        "  color: #ffffff;"
+        "  background-color: #2d2d2d;"
+        "  padding: 4px 8px;"
+        "  font-weight: bold;"
+        "}"
+        "button {"
+        "  background: linear-gradient(to bottom, #404040, #303030);"
+        "  border: 1px solid #555555;"
+        "  border-radius: 4px;"
+        "  color: #ffffff;"
+        "  padding: 8px 16px;"
+        "  margin: 2px;"
+        "  font-weight: bold;"
+        "}"
+        "button:hover {"
+        "  background: linear-gradient(to bottom, #505050, #404040);"
+        "  border: 1px solid #666666;"
+        "  box-shadow: 0 2px 4px rgba(255,255,255,0.1);"
+        "}"
+        "button:active {"
+        "  background: linear-gradient(to bottom, #303030, #404040);"
+        "  border: 1px solid #777777;"
+        "  box-shadow: inset 0 2px 4px rgba(0,0,0,0.3);"
+        "}"
+        "label {"
+        "  color: #ffffff;"
+        "  background-color: transparent;"
+        "}"
+        "drawingarea {"
+        "  background-color: #000000;"
+        "  border: 1px solid #404040;"
+        "}";
+    
+    gtk_css_provider_load_from_data(css_provider, css_data, -1, NULL);
+    
+    // Apply to default screen
+    GdkScreen* screen = gdk_screen_get_default();
+    gtk_style_context_add_provider_for_screen(screen,
+                                               GTK_STYLE_PROVIDER(css_provider),
+                                               GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
+    
+    g_object_unref(css_provider);
+    std::cout << "🎨 Dark theme applied" << std::endl;
 }
 
 void RTSPStreamClient::create_video_area() {
