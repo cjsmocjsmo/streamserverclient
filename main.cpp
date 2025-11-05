@@ -13,7 +13,6 @@
 
 #include <gtk/gtk.h>
 #include <gst/gst.h>
-#include <gst/video/videooverlay.h>
 #include <json/json.h>
 #include <mqtt/async_client.h>
 #include <sqlite3.h>
@@ -61,7 +60,6 @@ enum PageType {
 class RTSPStreamClient {
 private:
     GtkWidget* window;
-    GtkWidget* main_container;  // Top-level horizontal container
     GtkWidget* sidebar;         // Left sidebar for camera buttons
     GtkWidget* page_stack;      // Container for switching between pages
     GtkWidget* content_area;    // Right content area (main or events)
@@ -74,7 +72,6 @@ private:
     // Events page widgets
     GtkWidget* events_page;
     GtkWidget* events_list;
-    GtkWidget* back_button;
     std::string current_events_filter;  // Current camera filter for events page
     
     std::vector<CameraConfig> cameras;
@@ -171,7 +168,6 @@ private:
     
     // GStreamer callbacks
     static gboolean on_bus_message(GstBus* bus, GstMessage* message, gpointer user_data);
-    static void on_pad_added(GstElement* src, GstPad* new_pad, gpointer user_data);
     static void on_element_added(GstBin* bin, GstElement* element, gpointer user_data);
 };
 
