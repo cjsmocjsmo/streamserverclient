@@ -117,6 +117,7 @@ public:
     
     bool initialize();
     void run();
+    void shutdown();  // Public shutdown method for signal handler
     
 private:
     bool load_camera_config();
@@ -155,6 +156,8 @@ private:
     void database_worker();
     void queue_event_for_db(const VideoEvent& event);
     void print_performance_stats();
+    void apply_video_widget_dark_theme(GtkWidget* video_widget);
+    bool try_create_pipeline(const CameraConfig& camera, const std::string& pipeline_desc);
     
     // GTK callbacks
     static void on_camera_button_clicked(GtkWidget* button, gpointer user_data);
@@ -166,6 +169,7 @@ private:
     // GStreamer callbacks
     static gboolean on_bus_message(GstBus* bus, GstMessage* message, gpointer user_data);
     static void on_pad_added(GstElement* src, GstPad* new_pad, gpointer user_data);
+    static void on_element_added(GstBin* bin, GstElement* element, gpointer user_data);
 };
 
 RTSPStreamClient::RTSPStreamClient() 
@@ -221,6 +225,17 @@ RTSPStreamClient::~RTSPStreamClient() {
     if (pipeline) {
         gst_element_set_state(pipeline, GST_STATE_NULL);
         gst_object_unref(pipeline);
+    }
+}
+
+void RTSPStreamClient::shutdown() {
+    std::cout << "📞 Shutdown method called" << std::endl;
+    if (window) {
+        // Trigger the window destroy handler which does proper cleanup
+        gtk_widget_destroy(window);
+    } else {
+        // Direct GTK quit if no window
+        gtk_main_quit();
     }
 }
 
@@ -507,81 +522,162 @@ bool RTSPStreamClient::connect_to_camera(const CameraConfig& camera) {
         disconnect_from_camera();
     }
     
-    // Create optimized GStreamer pipeline for low CPU usage
-    // Hardware decoding, frame rate limiting, and proper buffering
-    std::string pipeline_str = 
-        "rtspsrc location=" + camera.url + " protocols=udp latency=0 buffer-mode=1 ! "
-        "queue max-size-buffers=2 max-size-bytes=0 max-size-time=0 ! "
+    // Try multiple pipeline configurations for maximum compatibility
+    std::vector<std::string> pipeline_configs = {
+        // Configuration 1: TCP+UDP with high timeout (VLC-like)
+        "rtspsrc location=" + camera.url + " protocols=tcp+udp+http latency=2000 timeout=10000000 tcp-timeout=10000000 "
+        "retry=3 do-retransmission=true buffer-mode=auto ! "
+        "queue max-size-buffers=5 max-size-bytes=0 max-size-time=2000000000 ! "
         "rtph264depay ! h264parse ! "
-        "avdec_h264 max-threads=2 ! "
+        "avdec_h264 max-threads=2 output-corrupt=false ! "
         "videorate drop-only=true ! video/x-raw,framerate=15/1 ! "
         "videoconvert ! "
         "videoscale method=1 ! video/x-raw,width=640,height=360 ! "
-        "gtksink sync=false";
+        "gtksink sync=false async=false",
+        
+        // Configuration 2: TCP only with basic settings
+        "rtspsrc location=" + camera.url + " protocols=tcp latency=500 timeout=5000000 ! "
+        "queue ! rtph264depay ! h264parse ! avdec_h264 ! "
+        "videoconvert ! videoscale ! video/x-raw,width=640,height=360 ! "
+        "gtksink sync=false",
+        
+        // Configuration 3: UDP only (original working config)
+        "rtspsrc location=" + camera.url + " protocols=udp latency=0 ! "
+        "queue ! rtph264depay ! h264parse ! avdec_h264 ! "
+        "videoconvert ! gtksink sync=false",
+        
+        // Configuration 4: Minimal pipeline for maximum compatibility
+        "rtspsrc location=" + camera.url + " ! "
+        "decodebin ! videoconvert ! autovideosink sync=false"
+    };
     
-    std::cout << "🚀 Creating pipeline: " << pipeline_str << std::endl;
+    // Try each configuration until one works
+    for (size_t i = 0; i < pipeline_configs.size(); i++) {
+        std::cout << "� Trying pipeline configuration " << (i + 1) << "/" << pipeline_configs.size() << std::endl;
+        
+        if (try_create_pipeline(camera, pipeline_configs[i])) {
+            std::cout << "✅ Successfully connected with configuration " << (i + 1) << std::endl;
+            current_camera = const_cast<CameraConfig*>(&camera);
+            is_connected = true;
+            
+            std::string status = "Connected to " + camera.name;
+            update_status(status);
+            publish_status("Connected to camera: " + camera.name);
+            
+            return true;
+        }
+        
+        std::cout << "❌ Configuration " << (i + 1) << " failed, trying next..." << std::endl;
+    }
+    
+    std::cerr << "❌ All pipeline configurations failed for " << camera.name << std::endl;
+    update_status("Connection failed: " + camera.name);
+    return false;
+}
+
+bool RTSPStreamClient::try_create_pipeline(const CameraConfig& camera, const std::string& pipeline_desc) {
+    std::cout << "🚀 Trying pipeline: " << pipeline_desc.substr(0, 80) << "..." << std::endl;
     
     GError* error = nullptr;
-    pipeline = gst_parse_launch(pipeline_str.c_str(), &error);
+    GstElement* test_pipeline = gst_parse_launch(pipeline_desc.c_str(), &error);
     
-    if (!pipeline) {
+    if (!test_pipeline) {
         std::cerr << "❌ Failed to create pipeline: " << (error ? error->message : "Unknown error") << std::endl;
         if (error) g_error_free(error);
         return false;
     }
     
-    // Get the video sink - for fakesink, we don't need to extract widget
-    video_sink = gst_bin_get_by_name(GST_BIN(pipeline), "fakesink0");
-    if (!video_sink) {
-        std::cout << "⚠️ Could not get fakesink element (this is normal)" << std::endl;
-        // This is actually normal for fakesink, continue anyway
-    }
-    
-    /* 
-    // GTK widget code - disabled for autovideosink testing
-    GtkWidget* video_widget;
-    g_object_get(video_sink, "widget", &video_widget, NULL);
-    
-    if (!video_widget) {
-        std::cerr << "❌ Failed to get video widget from gtksink" << std::endl;
-        gst_object_unref(video_sink);
-        gst_object_unref(pipeline);
-        video_sink = nullptr;
-        pipeline = nullptr;
+    // Test if pipeline can be started
+    GstStateChangeReturn ret = gst_element_set_state(test_pipeline, GST_STATE_READY);
+    if (ret == GST_STATE_CHANGE_FAILURE) {
+        std::cerr << "❌ Pipeline failed to reach READY state" << std::endl;
+        gst_object_unref(test_pipeline);
         return false;
     }
     
-    std::cout << "✅ Got video widget from gtksink" << std::endl;
+    // If we get here, the pipeline is good - make it our main pipeline
+    pipeline = test_pipeline;
     
-    // Set explicit size for the video widget
-    gtk_widget_set_size_request(video_widget, 286, 162);
-    gtk_widget_set_hexpand(video_widget, TRUE);
-    gtk_widget_set_vexpand(video_widget, TRUE);
-    
-    // Replace the drawing area with the video widget
-    GtkWidget* parent = gtk_widget_get_parent(video_area);
-    if (parent) {
-        gtk_container_remove(GTK_CONTAINER(parent), video_area);
-        gtk_container_add(GTK_CONTAINER(parent), video_widget);
-        gtk_widget_show_all(video_widget);
-        std::cout << "✅ Video widget added to container (800x450)" << std::endl;
-    } else {
-        std::cerr << "❌ No parent container found for video area" << std::endl;
+    // Get the video sink and apply dark theming
+    video_sink = gst_bin_get_by_name(GST_BIN(pipeline), "gtksink0");
+    if (!video_sink) {
+        std::cout << "⚠️ Could not get gtksink element, trying fallback" << std::endl;
+        // Try to get it by interface
+        GstBin* bin = GST_BIN(pipeline);
+        GstIterator* iter = gst_bin_iterate_sinks(bin);
+        GValue value = G_VALUE_INIT;
+        gboolean done = FALSE;
+        
+        while (!done) {
+            switch (gst_iterator_next(iter, &value)) {
+                case GST_ITERATOR_OK: {
+                    GstElement* element = GST_ELEMENT(g_value_get_object(&value));
+                    if (g_str_has_prefix(GST_ELEMENT_NAME(element), "gtksink")) {
+                        video_sink = GST_ELEMENT(gst_object_ref(element));
+                        done = TRUE;
+                    }
+                    g_value_reset(&value);
+                    break;
+                }
+                case GST_ITERATOR_RESYNC:
+                    gst_iterator_resync(iter);
+                    break;
+                case GST_ITERATOR_ERROR:
+                case GST_ITERATOR_DONE:
+                    done = TRUE;
+                    break;
+            }
+        }
+        g_value_unset(&value);
+        gst_iterator_free(iter);
     }
     
-    video_area = video_widget;
-    */
+    // If we found gtksink, get its widget and apply dark theme
+    if (video_sink) {
+        GtkWidget* video_widget;
+        g_object_get(video_sink, "widget", &video_widget, NULL);
+        
+        if (video_widget) {
+            std::cout << "✅ Got video widget from gtksink" << std::endl;
+            
+            // Apply dark theme to video widget
+            apply_video_widget_dark_theme(video_widget);
+            
+            // Set explicit size for the video widget
+            gtk_widget_set_size_request(video_widget, 640, 360);
+            gtk_widget_set_hexpand(video_widget, TRUE);
+            gtk_widget_set_vexpand(video_widget, TRUE);
+            
+            // Replace the drawing area with the video widget
+            GtkWidget* parent = gtk_widget_get_parent(video_area);
+            if (parent) {
+                gtk_container_remove(GTK_CONTAINER(parent), video_area);
+                gtk_container_add(GTK_CONTAINER(parent), video_widget);
+                gtk_widget_show_all(video_widget);
+                std::cout << "✅ Video widget added to container with dark theme" << std::endl;
+            } else {
+                std::cerr << "❌ No parent container found for video area" << std::endl;
+            }
+            
+            video_area = video_widget;
+        } else {
+            std::cout << "⚠️ Could not get widget from gtksink" << std::endl;
+        }
+    }
     
     // Set up bus monitoring
     GstBus* bus = gst_element_get_bus(pipeline);
     gst_bus_add_watch(bus, on_bus_message, this);
     gst_object_unref(bus);
     
+    // Connect to element-added signal to catch gtksink widget creation
+    g_signal_connect(pipeline, "element-added", G_CALLBACK(on_element_added), this);
+    
     // Start the pipeline
     std::cout << "🚀 Starting pipeline..." << std::endl;
-    GstStateChangeReturn ret = gst_element_set_state(pipeline, GST_STATE_PLAYING);
+    GstStateChangeReturn start_ret = gst_element_set_state(pipeline, GST_STATE_PLAYING);
     
-    if (ret == GST_STATE_CHANGE_FAILURE) {
+    if (start_ret == GST_STATE_CHANGE_FAILURE) {
         std::cerr << "❌ Failed to start pipeline" << std::endl;
         gst_object_unref(video_sink);
         gst_object_unref(pipeline);
@@ -902,12 +998,53 @@ void RTSPStreamClient::on_window_destroy(GtkWidget* widget, gpointer user_data) 
     RTSPStreamClient* self = static_cast<RTSPStreamClient*>(user_data);
     std::cout << "👋 Application shutting down..." << std::endl;
     
+    // Stop background worker threads first
+    self->stop_worker_ = true;
+    self->stop_db_worker_ = true;
+    
+    // Wake up waiting threads
+    self->queue_cv_.notify_all();
+    self->db_cv_.notify_all();
+    
+    // Wait for worker threads to complete
+    if (self->worker_thread_.joinable()) {
+        std::cout << "🛑 Stopping MQTT worker thread..." << std::endl;
+        self->worker_thread_.join();
+        std::cout << "✅ MQTT worker thread stopped" << std::endl;
+    }
+    
+    if (self->db_thread_.joinable()) {
+        std::cout << "🛑 Stopping database worker thread..." << std::endl;
+        self->db_thread_.join();
+        std::cout << "✅ Database worker thread stopped" << std::endl;
+    }
+    
+    // Disconnect MQTT client
+    if (self->mqtt_client_ && self->mqtt_client_->is_connected()) {
+        std::cout << "🔌 Disconnecting MQTT client..." << std::endl;
+        try {
+            self->mqtt_client_->disconnect();
+            std::cout << "✅ MQTT client disconnected" << std::endl;
+        } catch (const std::exception& e) {
+            std::cerr << "⚠️ Error disconnecting MQTT: " << e.what() << std::endl;
+        }
+    }
+    
+    // Disconnect from camera and clean up pipeline
     if (self->pipeline) {
         self->disconnect_from_camera();
     }
     
+    // Close database connection
+    if (self->db) {
+        std::cout << "🗄️ Closing database connection..." << std::endl;
+        sqlite3_close(self->db);
+        self->db = nullptr;
+        std::cout << "✅ Database closed" << std::endl;
+    }
+    
+    std::cout << "🔚 Application cleanup complete, quitting GTK main loop..." << std::endl;
     gtk_main_quit();
-    std::cout << "🔚 Application cleanup complete" << std::endl;
 }
 
 gboolean RTSPStreamClient::on_bus_message(GstBus* bus, GstMessage* message, gpointer user_data) {
@@ -1490,8 +1627,154 @@ void RTSPStreamClient::print_performance_stats() {
     }
 }
 
+void RTSPStreamClient::apply_video_widget_dark_theme(GtkWidget* video_widget) {
+    if (!video_widget) return;
+    
+    std::cout << "🎨 Applying dark theme to video widget" << std::endl;
+    
+    // Create specific CSS for this video widget
+    GtkCssProvider* css_provider = gtk_css_provider_new();
+    
+    const char* video_css = 
+        "* {"
+        "  background-color: #000000;"
+        "  color: #ffffff;"
+        "}"
+        "button {"
+        "  background-color: #404040;"
+        "  color: #ffffff;"
+        "  border: 1px solid #555555;"
+        "}"
+        "button:hover {"
+        "  background-color: #505050;"
+        "}"
+        "button:active {"
+        "  background-color: #303030;"
+        "}"
+        "scale, progressbar {"
+        "  background-color: #404040;"
+        "  color: #ffffff;"
+        "}"
+        "label {"
+        "  color: #ffffff;"
+        "}";    gtk_css_provider_load_from_data(css_provider, video_css, -1, NULL);
+    
+    // Apply CSS to the video widget's style context
+    GtkStyleContext* context = gtk_widget_get_style_context(video_widget);
+    gtk_style_context_add_provider(context, 
+                                   GTK_STYLE_PROVIDER(css_provider),
+                                   GTK_STYLE_PROVIDER_PRIORITY_USER);
+    
+    // Set background color directly
+    GdkRGBA black_color;
+    gdk_rgba_parse(&black_color, "#000000");
+    gtk_widget_override_background_color(video_widget, GTK_STATE_FLAG_NORMAL, &black_color);
+    
+    // Apply to all child widgets recursively
+    if (GTK_IS_CONTAINER(video_widget)) {
+        GList* children = gtk_container_get_children(GTK_CONTAINER(video_widget));
+        for (GList* iter = children; iter != NULL; iter = g_list_next(iter)) {
+            GtkWidget* child = GTK_WIDGET(iter->data);
+            
+            // Apply CSS to child
+            GtkStyleContext* child_context = gtk_widget_get_style_context(child);
+            gtk_style_context_add_provider(child_context,
+                                           GTK_STYLE_PROVIDER(css_provider),
+                                           GTK_STYLE_PROVIDER_PRIORITY_USER);
+            
+            // Force dark colors on child widgets
+            gtk_widget_override_background_color(child, GTK_STATE_FLAG_NORMAL, &black_color);
+            
+            GdkRGBA white_color;
+            gdk_rgba_parse(&white_color, "#ffffff");
+            gtk_widget_override_color(child, GTK_STATE_FLAG_NORMAL, &white_color);
+            
+            // Recursively apply to container children
+            if (GTK_IS_CONTAINER(child)) {
+                apply_video_widget_dark_theme(child);
+            }
+        }
+        g_list_free(children);
+    }
+    
+    g_object_unref(css_provider);
+    std::cout << "🎨 Video widget dark theme applied" << std::endl;
+}
+
+void RTSPStreamClient::on_element_added(GstBin* bin, GstElement* element, gpointer user_data) {
+    RTSPStreamClient* self = static_cast<RTSPStreamClient*>(user_data);
+    
+    // Check if this is a gtksink element
+    if (g_str_has_prefix(GST_ELEMENT_NAME(element), "gtksink")) {
+        std::cout << "🔍 Found gtksink element: " << GST_ELEMENT_NAME(element) << std::endl;
+        
+        // Wait a bit for the widget to be created
+        g_timeout_add(100, [](gpointer user_data) -> gboolean {
+            RTSPStreamClient* self = static_cast<RTSPStreamClient*>(user_data);
+            
+            // Try to get all gtksink elements and apply theming
+            GstBin* pipeline_bin = GST_BIN(self->pipeline);
+            GstIterator* iter = gst_bin_iterate_sinks(pipeline_bin);
+            GValue value = G_VALUE_INIT;
+            gboolean done = FALSE;
+            
+            while (!done) {
+                switch (gst_iterator_next(iter, &value)) {
+                    case GST_ITERATOR_OK: {
+                        GstElement* sink = GST_ELEMENT(g_value_get_object(&value));
+                        if (g_str_has_prefix(GST_ELEMENT_NAME(sink), "gtksink")) {
+                            GtkWidget* video_widget;
+                            g_object_get(sink, "widget", &video_widget, NULL);
+                            
+                            if (video_widget) {
+                                std::cout << "🎨 Applying delayed dark theme to video widget" << std::endl;
+                                self->apply_video_widget_dark_theme(video_widget);
+                            }
+                        }
+                        g_value_reset(&value);
+                        break;
+                    }
+                    case GST_ITERATOR_RESYNC:
+                        gst_iterator_resync(iter);
+                        break;
+                    case GST_ITERATOR_ERROR:
+                    case GST_ITERATOR_DONE:
+                        done = TRUE;
+                        break;
+                }
+            }
+            g_value_unset(&value);
+            gst_iterator_free(iter);
+            
+            return G_SOURCE_REMOVE; // Remove this timeout
+        }, self);
+    }
+}
+
+#include <csignal>
+
+// Global pointer for signal handling
+RTSPStreamClient* g_app_instance = nullptr;
+
+void signal_handler(int signal) {
+    std::cout << "\n🛑 Received signal " << signal << ", shutting down gracefully..." << std::endl;
+    
+    if (g_app_instance) {
+        g_app_instance->shutdown();
+    } else {
+        // Direct GTK quit if no app instance
+        gtk_main_quit();
+    }
+}
+
 int main(int argc, char* argv[]) {
+    // Set up signal handlers for graceful shutdown
+    signal(SIGINT, signal_handler);   // Ctrl+C
+    signal(SIGTERM, signal_handler);  // Termination signal
+    signal(SIGHUP, signal_handler);   // Hangup signal
+    
     RTSPStreamClient app;
+    g_app_instance = &app;  // Set global pointer for signal handler
     
     if (!app.initialize()) {
         std::cerr << "❌ Failed to initialize application" << std::endl;
@@ -1499,5 +1782,9 @@ int main(int argc, char* argv[]) {
     }
     
     app.run();
+    
+    // Clear global pointer
+    g_app_instance = nullptr;
+    
     return 0;
 }
