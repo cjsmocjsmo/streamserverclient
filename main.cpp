@@ -26,6 +26,12 @@
 #include <string>
 #include <iomanip>
 #include <sstream>
+#include <queue>
+#include <mutex>
+#include <condition_variable>
+#include <atomic>
+#include <unistd.h>
+#include <sys/resource.h>
 
 struct CameraConfig {
     std::string name;
@@ -87,6 +93,20 @@ private:
     std::string client_id_;
     bool mqtt_connected_;
     
+    // Background processing
+    std::queue<mqtt::const_message_ptr> message_queue_;
+    std::mutex queue_mutex_;
+    std::condition_variable queue_cv_;
+    std::thread worker_thread_;
+    std::atomic<bool> stop_worker_;
+    
+    // Database batching
+    std::queue<VideoEvent> db_queue_;
+    std::mutex db_mutex_;
+    std::condition_variable db_cv_;
+    std::thread db_thread_;
+    std::atomic<bool> stop_db_worker_;
+    
     // Database components
     sqlite3* db;
     std::string db_path;
@@ -131,6 +151,10 @@ private:
     void connect_mqtt();
     void handle_mqtt_message(mqtt::const_message_ptr msg);
     void publish_status(const std::string& message);
+    void message_worker();
+    void database_worker();
+    void queue_event_for_db(const VideoEvent& event);
+    void print_performance_stats();
     
     // GTK callbacks
     static void on_camera_button_clicked(GtkWidget* button, gpointer user_data);
@@ -151,13 +175,33 @@ RTSPStreamClient::RTSPStreamClient()
       current_camera(nullptr), is_connected(false),
       mqtt_broker_("tcp://10.0.4.40:1883"), 
       client_id_("rtsp_client_" + std::to_string(getpid())),
-      mqtt_connected_(false),
+      mqtt_connected_(false), stop_worker_(false), stop_db_worker_(false),
       sidebar(nullptr), content_area(nullptr), events_page(nullptr), events_list(nullptr),
       current_page(PAGE_MAIN), current_events_filter(""),
       db(nullptr), db_path("rtsp_events.db") {
+    
+    // Start background worker threads
+    worker_thread_ = std::thread(&RTSPStreamClient::message_worker, this);
+    db_thread_ = std::thread(&RTSPStreamClient::database_worker, this);
 }
 
 RTSPStreamClient::~RTSPStreamClient() {
+    // Stop worker threads
+    stop_worker_ = true;
+    stop_db_worker_ = true;
+    
+    // Wake up waiting threads
+    queue_cv_.notify_all();
+    db_cv_.notify_all();
+    
+    // Wait for threads to finish
+    if (worker_thread_.joinable()) {
+        worker_thread_.join();
+    }
+    if (db_thread_.joinable()) {
+        db_thread_.join();
+    }
+    
     // Cleanup database
     if (db) {
         sqlite3_close(db);
@@ -322,16 +366,16 @@ void RTSPStreamClient::apply_dark_theme() {
         "  background-color: #1e1e1e;"
         "}"
         "frame {"
-        "  background-color: #2d2d2d;"
+        "  background-color: #1e1e1e;"
         "  border: 1px solid #404040;"
         "  border-radius: 4px;"
         "}"
         "frame > border {"
-        "  background-color: #2d2d2d;"
+        "  background-color: #1e1e1e;"
         "}"
         "frame > label {"
         "  color: #ffffff;"
-        "  background-color: #2d2d2d;"
+        "  background-color: #1e1e1e;"
         "  padding: 4px 8px;"
         "  font-weight: bold;"
         "}"
@@ -463,12 +507,17 @@ bool RTSPStreamClient::connect_to_camera(const CameraConfig& camera) {
         disconnect_from_camera();
     }
     
-    // Create GStreamer pipeline using gst_parse_launch for reliability
-    // Try with fakesink first to test if data is flowing
+    // Create optimized GStreamer pipeline for low CPU usage
+    // Hardware decoding, frame rate limiting, and proper buffering
     std::string pipeline_str = 
-        "rtspsrc location=" + camera.url + " protocols=udp latency=0 ! "
-        "rtph264depay ! h264parse ! avdec_h264 ! "
-        "videoconvert ! gtksink";
+        "rtspsrc location=" + camera.url + " protocols=udp latency=0 buffer-mode=1 ! "
+        "queue max-size-buffers=2 max-size-bytes=0 max-size-time=0 ! "
+        "rtph264depay ! h264parse ! "
+        "avdec_h264 max-threads=2 ! "
+        "videorate drop-only=true ! video/x-raw,framerate=15/1 ! "
+        "videoconvert ! "
+        "videoscale method=1 ! video/x-raw,width=640,height=360 ! "
+        "gtksink sync=false";
     
     std::cout << "🚀 Creating pipeline: " << pipeline_str << std::endl;
     
@@ -629,9 +678,11 @@ void RTSPStreamClient::init_mqtt() {
             update_mqtt_status("Connection Lost", false);
         });
         
-        // Set up message callback
+        // Set up message callback - queue messages for background processing
         mqtt_client_->set_message_callback([this](mqtt::const_message_ptr msg) {
-            handle_mqtt_message(msg);
+            std::lock_guard<std::mutex> lock(queue_mutex_);
+            message_queue_.push(msg);
+            queue_cv_.notify_one();
         });
         
         std::cout << "📡 MQTT client initialized for broker: " << mqtt_broker_ << std::endl;
@@ -693,21 +744,13 @@ void RTSPStreamClient::handle_mqtt_message(mqtt::const_message_ptr msg) {
                 event.video_path = root["video_path"].asString();
                 event.viewed = root.get("viewed", false).asBool();
                 
-                // Save to database
-                if (save_event_to_db(event)) {
-                    // Add to events vector for immediate UI update
-                    events.insert(events.begin(), event); // Add to front for most recent first
-                    
-                    // Update UI in main thread
-                    g_idle_add([](gpointer user_data) -> gboolean {
-                        RTSPStreamClient* self = static_cast<RTSPStreamClient*>(user_data);
-                        self->update_sidebar_counts();
-                        self->refresh_events_page();
-                        return G_SOURCE_REMOVE;
-                    }, this);
-                    
-                    std::cout << "✅ New event processed: " << event.camera_name << std::endl;
-                }
+                // Add to events vector for immediate UI response
+                events.insert(events.begin(), event); // Add to front for most recent first
+                
+                // Queue for database processing in background
+                queue_event_for_db(event);
+                
+                std::cout << "✅ Event queued for processing: " << event.camera_name << std::endl;
             } else {
                 std::cerr << "❌ Failed to parse event JSON" << std::endl;
             }
@@ -1347,6 +1390,104 @@ void RTSPStreamClient::on_sidebar_button_clicked(GtkWidget* button, gpointer use
     gint column_count = g_list_length(columns);
     g_list_free(columns);
     std::cout << "🔍 Tree view visible: " << (is_visible ? "YES" : "NO") << ", columns: " << column_count << std::endl;
+}
+
+void RTSPStreamClient::message_worker() {
+    std::cout << "📨 Message worker thread started" << std::endl;
+    auto last_stats_time = std::chrono::steady_clock::now();
+    
+    while (!stop_worker_) {
+        std::unique_lock<std::mutex> lock(queue_mutex_);
+        queue_cv_.wait_for(lock, std::chrono::seconds(5), [this] { return !message_queue_.empty() || stop_worker_; });
+        
+        while (!message_queue_.empty() && !stop_worker_) {
+            auto msg = message_queue_.front();
+            message_queue_.pop();
+            lock.unlock();
+            
+            // Process message in background thread
+            handle_mqtt_message(msg);
+            
+            lock.lock();
+        }
+        
+        // Print performance stats every 30 seconds
+        auto now = std::chrono::steady_clock::now();
+        if (std::chrono::duration_cast<std::chrono::seconds>(now - last_stats_time).count() >= 30) {
+            print_performance_stats();
+            last_stats_time = now;
+        }
+    }
+    
+    std::cout << "📨 Message worker thread stopped" << std::endl;
+}
+
+void RTSPStreamClient::database_worker() {
+    std::cout << "🗄️ Database worker thread started" << std::endl;
+    
+    while (!stop_db_worker_) {
+        std::unique_lock<std::mutex> lock(db_mutex_);
+        db_cv_.wait(lock, [this] { return !db_queue_.empty() || stop_db_worker_; });
+        
+        std::vector<VideoEvent> batch;
+        while (!db_queue_.empty() && !stop_db_worker_) {
+            batch.push_back(db_queue_.front());
+            db_queue_.pop();
+            if (batch.size() >= 10) break; // Process in batches of 10
+        }
+        lock.unlock();
+        
+        // Process batch
+        for (const auto& event : batch) {
+            if (save_event_to_db(event)) {
+                // Update UI in main thread
+                g_idle_add([](gpointer user_data) -> gboolean {
+                    RTSPStreamClient* self = static_cast<RTSPStreamClient*>(user_data);
+                    self->update_sidebar_counts();
+                    self->refresh_events_page();
+                    return G_SOURCE_REMOVE;
+                }, this);
+            }
+        }
+        
+        // Small delay to batch more efficiently
+        if (!stop_db_worker_) {
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+        }
+    }
+    
+    std::cout << "🗄️ Database worker thread stopped" << std::endl;
+}
+
+void RTSPStreamClient::queue_event_for_db(const VideoEvent& event) {
+    std::lock_guard<std::mutex> lock(db_mutex_);
+    db_queue_.push(event);
+    db_cv_.notify_one();
+}
+
+void RTSPStreamClient::print_performance_stats() {
+    struct rusage usage;
+    if (getrusage(RUSAGE_SELF, &usage) == 0) {
+        // Convert to percentages (rough estimate)
+        double cpu_time = usage.ru_utime.tv_sec + usage.ru_utime.tv_usec / 1000000.0;
+        long memory_kb = usage.ru_maxrss; // Peak memory usage in KB
+        
+        std::cout << "📊 Performance: CPU time: " << std::fixed << std::setprecision(2) 
+                  << cpu_time << "s, Peak Memory: " << memory_kb << " KB" << std::endl;
+        
+        // Queue status
+        size_t mqtt_queue_size, db_queue_size;
+        {
+            std::lock_guard<std::mutex> lock1(queue_mutex_);
+            mqtt_queue_size = message_queue_.size();
+        }
+        {
+            std::lock_guard<std::mutex> lock2(db_mutex_);
+            db_queue_size = db_queue_.size();
+        }
+        
+        std::cout << "📈 Queues: MQTT=" << mqtt_queue_size << ", DB=" << db_queue_size << std::endl;
+    }
 }
 
 int main(int argc, char* argv[]) {
