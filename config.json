@@ -1,23 +1,19 @@
 {
-  "streams": {
-    "stream1": {
+  "cameras": [
+    {
       "name": "piir - Shed",
-      "url": "http://10.0.4.67:8000/stream.mjpg",
+      "url": "rtsp://10.0.4.67:8554/stream",
       "description": "Shed camera"
     },
-    "stream2": {
-      "name": "pipiw - BackDoor", 
-      "url": "http://10.0.6.165:8000/stream.mjpg",
-      "description": "BackDoor camera"
-    },
-    "stream3": {
+    {
       "name": "picam - FrontDoor",
-      "url": "http://10.0.4.60:8000/stream.mjpg", 
+      "url": "rtsp://10.0.4.60:8554/stream",
       "description": "FrontDoor camera"
+    },
+    {
+      "name": "pipiw - BackDoor",
+      "url": "rtsp://10.0.6.165:8554/stream",
+      "description": "BackDoor camera"
     }
-  },
-  "server": {
-    "port": 8000,
-    "host": "0.0.0.0"
-  }
+  ]
 }
