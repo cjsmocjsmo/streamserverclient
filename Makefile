@@ -14,9 +14,10 @@ GTK_FLAGS = $(shell $(PKG_CONFIG) --cflags --libs gtk+-3.0)
 GST_FLAGS = $(shell $(PKG_CONFIG) --cflags --libs gstreamer-1.0 gstreamer-video-1.0)
 JSON_FLAGS = $(shell $(PKG_CONFIG) --cflags --libs jsoncpp)
 MQTT_FLAGS = -I/usr/include/mqtt -lpaho-mqttpp3 -lpaho-mqtt3a
+SQLITE_FLAGS = -lsqlite3
 
 # All flags combined
-ALL_FLAGS = $(CXXFLAGS) $(GTK_FLAGS) $(GST_FLAGS) $(JSON_FLAGS) $(MQTT_FLAGS)
+ALL_FLAGS = $(CXXFLAGS) $(GTK_FLAGS) $(GST_FLAGS) $(JSON_FLAGS) $(MQTT_FLAGS) $(SQLITE_FLAGS)
 
 # Build target
 $(TARGET): $(SOURCES)
@@ -26,6 +27,7 @@ $(TARGET): $(SOURCES)
 	@$(PKG_CONFIG) --exists gstreamer-1.0 || (echo "❌ GStreamer development files not found. Install with: sudo apt install libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev" && exit 1)
 	@$(PKG_CONFIG) --exists jsoncpp || (echo "❌ JsonCpp development files not found. Install with: sudo apt install libjsoncpp-dev" && exit 1)
 	@test -f /usr/include/mqtt/async_client.h || (echo "❌ Paho MQTT C++ not found. Install with: sudo apt install libpaho-mqttpp-dev" && exit 1)
+	@test -f /usr/include/sqlite3.h || (echo "❌ SQLite3 development files not found. Install with: sudo apt install libsqlite3-dev" && exit 1)
 	@echo "✅ All dependencies found"
 	$(CXX) -o $(TARGET) $(SOURCES) $(ALL_FLAGS)
 	@echo "✅ Build complete: $(TARGET)"
