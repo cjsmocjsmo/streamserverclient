@@ -32,6 +32,9 @@
 #include <atomic>
 #include <unistd.h>
 #include <sys/resource.h>
+#include <csignal>
+#include <cstdlib>
+#include <future>
 
 struct CameraConfig {
     std::string name;
@@ -229,13 +232,42 @@ RTSPStreamClient::~RTSPStreamClient() {
 }
 
 void RTSPStreamClient::shutdown() {
-    std::cout << "📞 Shutdown method called" << std::endl;
-    if (window) {
-        // Trigger the window destroy handler which does proper cleanup
-        gtk_widget_destroy(window);
-    } else {
-        // Direct GTK quit if no window
+    std::cout << "📞 Shutdown method called - starting graceful shutdown..." << std::endl;
+    
+    // Set up a timeout for forced shutdown
+    std::atomic<bool> shutdown_complete{false};
+    
+    // Launch shutdown sequence in a separate thread with timeout
+    auto shutdown_future = std::async(std::launch::async, [this, &shutdown_complete]() {
+        if (window) {
+            std::cout << "🪟 Destroying window to trigger cleanup..." << std::endl;
+            // Trigger the window destroy handler which does proper cleanup
+            gtk_widget_destroy(window);
+        } else {
+            std::cout << "🚪 No window found, calling gtk_main_quit directly..." << std::endl;
+            // Direct GTK quit if no window
+            gtk_main_quit();
+        }
+        shutdown_complete = true;
+    });
+    
+    // Wait for shutdown with timeout
+    auto timeout = std::chrono::seconds(5);
+    if (shutdown_future.wait_for(timeout) == std::future_status::timeout) {
+        std::cout << "⏰ Graceful shutdown timed out after 5 seconds, forcing exit..." << std::endl;
+        
+        // Force quit GTK main loop
         gtk_main_quit();
+        
+        // Give it another moment
+        std::this_thread::sleep_for(std::chrono::milliseconds(500));
+        
+        if (!shutdown_complete) {
+            std::cout << "💀 Forcing process termination with exit()..." << std::endl;
+            std::exit(0);  // Force immediate termination
+        }
+    } else {
+        std::cout << "✅ Graceful shutdown completed successfully" << std::endl;
     }
 }
 
@@ -1045,6 +1077,13 @@ void RTSPStreamClient::on_window_destroy(GtkWidget* widget, gpointer user_data) 
     
     std::cout << "🔚 Application cleanup complete, quitting GTK main loop..." << std::endl;
     gtk_main_quit();
+    
+    // Add a timeout to force exit if GTK doesn't quit properly
+    std::thread([]{
+        std::this_thread::sleep_for(std::chrono::seconds(3));
+        std::cout << "⚠️ GTK main loop didn't quit in 3 seconds, forcing exit..." << std::endl;
+        std::exit(0);
+    }).detach();
 }
 
 gboolean RTSPStreamClient::on_bus_message(GstBus* bus, GstMessage* message, gpointer user_data) {
@@ -1755,15 +1794,28 @@ void RTSPStreamClient::on_element_added(GstBin* bin, GstElement* element, gpoint
 
 // Global pointer for signal handling
 RTSPStreamClient* g_app_instance = nullptr;
+std::atomic<bool> g_shutdown_in_progress{false};
 
 void signal_handler(int signal) {
     std::cout << "\n🛑 Received signal " << signal << ", shutting down gracefully..." << std::endl;
+    
+    // If we already started shutdown, force exit immediately
+    if (g_shutdown_in_progress.exchange(true)) {
+        std::cout << "💀 Second signal received, forcing immediate exit!" << std::endl;
+        std::exit(signal);
+    }
     
     if (g_app_instance) {
         g_app_instance->shutdown();
     } else {
         // Direct GTK quit if no app instance
+        std::cout << "🚪 No app instance, calling gtk_main_quit directly..." << std::endl;
         gtk_main_quit();
+        
+        // Force exit after a moment if GTK doesn't quit
+        std::this_thread::sleep_for(std::chrono::seconds(2));
+        std::cout << "💀 GTK didn't quit, forcing exit..." << std::endl;
+        std::exit(signal);
     }
 }
 
