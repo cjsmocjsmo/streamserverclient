@@ -6,7 +6,7 @@ TARGET = rtsp_stream_client
 SOURCES = main.cpp
 
 # Compiler flags
-CXXFLAGS = -std=c++11 -Wall -Wextra -O2
+CXXFLAGS = -std=c++17 -Wall -Wextra -O2
 
 # Package config for dependencies
 PKG_CONFIG = pkg-config
