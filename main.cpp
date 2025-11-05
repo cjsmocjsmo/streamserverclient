@@ -228,43 +228,20 @@ RTSPStreamClient::~RTSPStreamClient() {
 }
 
 void RTSPStreamClient::shutdown() {
-    std::cout << "📞 Shutdown method called - starting graceful shutdown..." << std::endl;
+    std::cout << "📞 Shutdown method called - forcing immediate shutdown..." << std::endl;
     
-    // Set up a timeout for forced shutdown
-    std::atomic<bool> shutdown_complete{false};
-    
-    // Launch shutdown sequence in a separate thread with timeout
-    auto shutdown_future = std::async(std::launch::async, [this, &shutdown_complete]() {
-        if (window) {
-            std::cout << "🪟 Destroying window to trigger cleanup..." << std::endl;
-            // Trigger the window destroy handler which does proper cleanup
-            gtk_widget_destroy(window);
-        } else {
-            std::cout << "🚪 No window found, calling gtk_main_quit directly..." << std::endl;
-            // Direct GTK quit if no window
-            gtk_main_quit();
-        }
-        shutdown_complete = true;
-    });
-    
-    // Wait for shutdown with timeout
-    auto timeout = std::chrono::seconds(5);
-    if (shutdown_future.wait_for(timeout) == std::future_status::timeout) {
-        std::cout << "⏰ Graceful shutdown timed out after 5 seconds, forcing exit..." << std::endl;
-        
-        // Force quit GTK main loop
-        gtk_main_quit();
-        
-        // Give it another moment
-        std::this_thread::sleep_for(std::chrono::milliseconds(500));
-        
-        if (!shutdown_complete) {
-            std::cout << "💀 Forcing process termination with exit()..." << std::endl;
-            std::exit(0);  // Force immediate termination
-        }
-    } else {
-        std::cout << "✅ Graceful shutdown completed successfully" << std::endl;
+    // Start cleanup but don't wait around
+    if (window) {
+        std::cout << "🪟 Destroying window..." << std::endl;
+        gtk_widget_destroy(window);
     }
+    
+    // Give cleanup 1 second max, then force exit
+    std::cout << "⏰ Allowing 1 second for cleanup, then forcing exit..." << std::endl;
+    std::this_thread::sleep_for(std::chrono::seconds(1));
+    
+    std::cout << "💀 Time's up! Forcing immediate process termination..." << std::endl;
+    std::exit(0);
 }
 
 bool RTSPStreamClient::load_camera_config() {
@@ -1071,15 +1048,14 @@ void RTSPStreamClient::on_window_destroy(GtkWidget* widget, gpointer user_data) 
         std::cout << "✅ Database closed" << std::endl;
     }
     
-    std::cout << "🔚 Application cleanup complete, quitting GTK main loop..." << std::endl;
+    std::cout << "🔚 Application cleanup complete, forcing immediate exit..." << std::endl;
+    
+    // Try GTK quit first, but don't rely on it
     gtk_main_quit();
     
-    // Add a timeout to force exit if GTK doesn't quit properly
-    std::thread([]{
-        std::this_thread::sleep_for(std::chrono::seconds(3));
-        std::cout << "⚠️ GTK main loop didn't quit in 3 seconds, forcing exit..." << std::endl;
-        std::exit(0);
-    }).detach();
+    // Force immediate termination - don't wait for GTK
+    std::cout << "💀 Bypassing GTK main loop, forcing process exit..." << std::endl;
+    std::exit(0);
 }
 
 gboolean RTSPStreamClient::on_bus_message(GstBus* bus, GstMessage* message, gpointer user_data) {
@@ -1803,14 +1779,13 @@ void signal_handler(int signal) {
     
     if (g_app_instance) {
         g_app_instance->shutdown();
+        // Don't wait - force exit after shutdown attempt
+        std::this_thread::sleep_for(std::chrono::milliseconds(500));
+        std::cout << "� Signal handler forcing exit after cleanup..." << std::endl;
+        std::exit(signal);
     } else {
-        // Direct GTK quit if no app instance
-        std::cout << "🚪 No app instance, calling gtk_main_quit directly..." << std::endl;
-        gtk_main_quit();
-        
-        // Force exit after a moment if GTK doesn't quit
-        std::this_thread::sleep_for(std::chrono::seconds(2));
-        std::cout << "💀 GTK didn't quit, forcing exit..." << std::endl;
+        // Direct exit if no app instance
+        std::cout << "� No app instance, forcing immediate exit..." << std::endl;
         std::exit(signal);
     }
 }
