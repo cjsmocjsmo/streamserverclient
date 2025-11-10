@@ -12,7 +12,7 @@
     },
     {
       "name": "pipiw - BackDoor",
-      "url": "rtsp://10.0.6.165:8554/stream",
+      "url": "rtsp://10.0.6.181:8554/stream",
       "description": "BackDoor camera"
     }
   ]
