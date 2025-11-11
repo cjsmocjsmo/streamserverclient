@@ -287,15 +287,16 @@ void RTSPStreamClient::setup_ui() {
     gtk_window_set_title(GTK_WINDOW(window), "RTSP Stream Client - C++");
     gtk_window_set_default_size(GTK_WINDOW(window), 358, 250);
     gtk_window_set_position(GTK_WINDOW(window), GTK_WIN_POS_CENTER);
-    
-    // Set dark window background
+    gtk_window_set_decorated(GTK_WINDOW(window), FALSE);
+    GtkWidget* header_bar = gtk_header_bar_new();
+    gtk_header_bar_set_title(GTK_HEADER_BAR(header_bar), "RTSP Stream Client - C++");
+    gtk_header_bar_set_show_close_button(GTK_HEADER_BAR(header_bar), TRUE);
+    gtk_widget_set_name(header_bar, "custom-headerbar");
+    gtk_window_set_titlebar(GTK_WINDOW(window), header_bar);
     GdkRGBA window_color;
     gdk_rgba_parse(&window_color, "#1e1e1e");
     gtk_widget_override_background_color(window, GTK_STATE_FLAG_NORMAL, &window_color);
-    
-    // Connect destroy signal
     g_signal_connect(window, "destroy", G_CALLBACK(on_window_destroy), this);
-    
     // Create main horizontal box to hold sidebar and content
     main_box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 0);
     gtk_widget_override_background_color(main_box, GTK_STATE_FLAG_NORMAL, &window_color);
@@ -357,112 +358,51 @@ void RTSPStreamClient::setup_ui() {
             }
         }
     }
-    
+
     // Update sidebar counts after loading events
     update_sidebar_counts();
-    
+
     // Initialize MQTT
     init_mqtt();
-    
+
     // Ensure main page is displayed initially
     show_page(PAGE_MAIN);
-    
+
     std::cout << "📺 UI setup complete with " << cameras.size() << " cameras" << std::endl;
 }
 
 void RTSPStreamClient::apply_dark_theme() {
     // Create CSS provider for dark theme
     GtkCssProvider* css_provider = gtk_css_provider_new();
-    
-    const char* css_data = 
-        "* {"
-        "  background-color: #1e1e1e;"
-        "  color: #ffffff;"
-        "}"
-        "window {"
-        "  background-color: #1e1e1e;"
-        "}"
-        "box {"
-        "  background-color: #1e1e1e;"
-        "}"
-        "frame {"
-        "  background-color: #1e1e1e;"
-        "  border: 2px solid #4A90E2;"
-        "  border-radius: 4px;"
-        "}"
-        "frame > border {"
-        "  background-color: #1e1e1e;"
-        "}"
-        "frame > label {"
-        "  color: #ffffff;"
-        "  background-color: #1e1e1e;"
-        "  padding: 4px 8px;"
-        "  font-weight: bold;"
-        "}"
-        "button {"
-        "  background: linear-gradient(to bottom, #404040, #303030);"
-        "  border: 2px solid #4A90E2;"
-        "  border-radius: 4px;"
-        "  color: #ffffff;"
-        "  padding: 8px 16px;"
-        "  margin: 2px;"
-        "  font-weight: bold;"
-        "}"
-        "button:hover {"
-        "  background: linear-gradient(to bottom, #505050, #404040);"
-        "  border: 2px solid #5BA0F2;"
-        "  box-shadow: 0 2px 4px rgba(74,144,226,0.3);"
-        "}"
-        "button:active {"
-        "  background: linear-gradient(to bottom, #303030, #404040);"
-        "  border: 2px solid #3A80D2;"
-        "  box-shadow: inset 0 2px 4px rgba(0,0,0,0.3);"
-        "}"
-        "label {"
-        "  color: #ffffff;"
-        "  background-color: transparent;"
-        "}"
-        "drawingarea {"
-        "  background-color: #000000;"
-        "  border: 2px solid #4A90E2;"
-        "}"
-        "treeview {"
-        "  background-color: #1e1e1e;"
-        "  color: #ffffff;"
-        "  border: 2px solid #4A90E2;"
-        "}"
-        "treeview.view {"
-        "  background-color: #1e1e1e;"
-        "  color: #ffffff;"
-        "}"
-        "treeview.view:selected {"
-        "  background-color: #404040;"
-        "  color: #ffffff;"
-        "}"
-        "treeview header {"
-        "  background-color: #2d2d2d;"
-        "  color: #ffffff;"
-        "  border: 2px solid #4A90E2;"
-        "  font-weight: bold;"
-        "}"
-        "treeview header button {"
-        "  background-color: #2d2d2d;"
-        "  color: #ffffff;"
-        "  border: 2px solid #4A90E2;"
-        "}"
-        "scrolledwindow {"
-        "  background-color: #1e1e1e;"
-        "  border: 2px solid #4A90E2;"
-        "}";
+
+    const char* css_data =
+        "* { background-color: #1e1e1e; color: #ffffff; }"
+        "window { background-color: #1e1e1e; }"
+        "#custom-headerbar { background-color: #222222; color: #ffffff; border-bottom: 2px solid #2196f3; }"
+        "box { background-color: #1e1e1e; }"
+        "frame { background-color: #1e1e1e; border: 2px solid #4A90E2; border-radius: 4px; }"
+        "frame > border { background-color: #1e1e1e; }"
+        "frame > label { color: #ffffff; background-color: #1e1e1e; padding: 4px 8px; font-weight: bold; }"
+        "button { background: linear-gradient(to bottom, #404040, #303030); border: 2px solid #4A90E2; border-radius: 4px; color: #ffffff; padding: 8px 16px; margin: 2px; font-weight: bold; }"
+        "button:hover { background: linear-gradient(to bottom, #505050, #404040); border: 2px solid #5BA0F2; box-shadow: 0 2px 4px rgba(74,144,226,0.3); }"
+        "button:active { background: linear-gradient(to bottom, #303030, #404040); border: 2px solid #3A80D2; box-shadow: inset 0 2px 4px rgba(0,0,0,0.3); }"
+        "label { color: #ffffff; background-color: transparent; }"
+        "drawingarea { background-color: #000000; border: 2px solid #4A90E2; }"
+        "treeview { background-color: #1e1e1e; color: #ffffff; border: 2px solid #4A90E2; }"
+        "treeview.view { background-color: #1e1e1e; color: #ffffff; }"
+        "treeview.view:selected { background-color: #404040; color: #ffffff; }"
+        "treeview header { background-color: #2d2d2d; color: #ffffff; border: 2px solid #4A90E2; font-weight: bold; }"
+        "treeview header button { background-color: #2d2d2d; color: #ffffff; border: 2px solid #4A90E2; }"
+        "scrolledwindow { background-color: #1e1e1e; border: 2px solid #4A90E2; }";
 
     gtk_css_provider_load_from_data(css_provider, css_data, -1, NULL);
-    
+
     // Apply to default screen
     GdkScreen* screen = gdk_screen_get_default();
     gtk_style_context_add_provider_for_screen(screen,
                                                GTK_STYLE_PROVIDER(css_provider),
                                                GTK_STYLE_PROVIDER_PRIORITY_APPLICATION);
-    
+
     g_object_unref(css_provider);
     std::cout << "🎨 Dark theme applied" << std::endl;
 }
@@ -511,10 +451,10 @@ void RTSPStreamClient::create_camera_buttons() {
     g_signal_connect(disconnect_button, "clicked", G_CALLBACK(on_disconnect_clicked), this);
     gtk_box_pack_start(GTK_BOX(button_box), disconnect_button, TRUE, TRUE, 0);
     
-    // Add test button
-    GtkWidget* test_button = gtk_button_new_with_label("Test Pattern");
-    g_signal_connect(test_button, "clicked", G_CALLBACK(on_test_clicked), this);
-    gtk_box_pack_start(GTK_BOX(button_box), test_button, TRUE, TRUE, 0);
+    // Add close button
+    GtkWidget* close_button = gtk_button_new_with_label("Close");
+    g_signal_connect(close_button, "clicked", G_CALLBACK(on_test_clicked), this);
+    gtk_box_pack_start(GTK_BOX(button_box), close_button, TRUE, TRUE, 0);
     
     std::cout << "🔘 Created " << cameras.size() << " camera buttons" << std::endl;
 }
@@ -952,51 +892,8 @@ void RTSPStreamClient::on_disconnect_clicked(GtkWidget* button, gpointer user_da
 
 void RTSPStreamClient::on_test_clicked(GtkWidget* button, gpointer user_data) {
     RTSPStreamClient* self = static_cast<RTSPStreamClient*>(user_data);
-    std::cout << "🔘 Test button clicked!" << std::endl;
-    
-    // Create test pattern
-    CameraConfig test_camera;
-    test_camera.name = "Test Pattern";
-    test_camera.url = "videotestsrc pattern=smpte ! video/x-raw,width=320,height=240,framerate=30/1";
-    test_camera.description = "Test pattern";
-    
-    // Modify pipeline creation for test pattern
-    if (self->pipeline) {
-        self->disconnect_from_camera();
-    }
-    
-    std::string pipeline_str = test_camera.url + " ! videoconvert ! autovideosink sync=false";
-    std::cout << "🧪 Creating test pipeline: " << pipeline_str << std::endl;
-    
-    GError* error = nullptr;
-    self->pipeline = gst_parse_launch(pipeline_str.c_str(), &error);
-    
-    if (self->pipeline) {
-        // Get video sink and widget
-        self->video_sink = gst_bin_get_by_name(GST_BIN(self->pipeline), "autovideosink0");
-        /*
-        if (self->video_sink) {
-            GtkWidget* video_widget;
-            g_object_get(self->video_sink, "widget", &video_widget, NULL);
-            
-            if (video_widget) {
-                GtkWidget* parent = gtk_widget_get_parent(self->video_area);
-                gtk_container_remove(GTK_CONTAINER(parent), self->video_area);
-                gtk_container_add(GTK_CONTAINER(parent), video_widget);
-                gtk_widget_show(video_widget);
-                self->video_area = video_widget;
-            }
-        }
-        */
-        
-        // Set up bus and start
-        GstBus* bus = gst_element_get_bus(self->pipeline);
-        gst_bus_add_watch(bus, on_bus_message, self);
-        gst_object_unref(bus);
-        
-        gst_element_set_state(self->pipeline, GST_STATE_PLAYING);
-        self->update_status("Playing test pattern");
-    }
+    std::cout << "🔘 Close button clicked! Shutting down..." << std::endl;
+    self->shutdown();
 }
 
 void RTSPStreamClient::on_window_destroy(GtkWidget* widget, gpointer user_data) {
